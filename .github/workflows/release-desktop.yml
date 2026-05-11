@@ -1,0 +1,41 @@
+name: Release Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-windows:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LISTEN_UPDATE_CHANNEL: latest
+      LISTEN_UPDATE_GITHUB_OWNER: davidmglickman
+      LISTEN_UPDATE_GITHUB_REPO: Listen
+      LISTEN_UPDATE_GITHUB_PRIVATE: false
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish desktop release
+        run: npm run release --workspace @listen/desktop
