@@ -1,0 +1,19 @@
+{
+  "name": "@listen/realtime",
+  "version": "0.1.0",
+  "main": "dist/services/realtime/src/server.js",
+  "types": "dist/services/realtime/src/server.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/services/realtime/src/server.js"
+  },
+  "dependencies": {
+    "@listen/shared": "0.1.0",
+    "@supabase/supabase-js": "^2.49.8",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "ws": "^8.18.1"
+  }
+}

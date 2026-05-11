@@ -1,0 +1,4607 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Listen</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --bg: #f9fafb;
+        --bg-accent: #f3f4f6;
+        --surface: #ffffff;
+        --surface-strong: #ffffff;
+        --surface-muted: #f3f4f6;
+        --border: #e5e7eb;
+        --border-strong: #d1d5db;
+        --text: #111827;
+        --text-muted: #6b7280;
+        --brand: #0f172a;
+        --brand-strong: #000000;
+        --brand-soft: #f8fafc;
+        --accent: #2563eb;
+        --warning-soft: #fef9c3;
+        --danger-soft: #fee2e2;
+        --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        overflow: hidden;
+        background: var(--bg);
+      }
+
+        .layout {
+          display: grid;
+          grid-template-columns: 84px minmax(0, 1fr);
+          min-height: 100vh;
+          width: 100%;
+          transition: grid-template-columns 160ms ease;
+        }
+
+        .panel {
+          min-width: 0;
+        }
+
+        .sidebar {
+          padding: 24px 12px;
+          border-right: 1px solid var(--border);
+          background: var(--surface);
+          transition: padding 160ms ease;
+        }
+
+        .workspace-main {
+          padding: 32px 40px;
+          height: 100vh;
+          overflow-y: auto;
+          box-sizing: border-box;
+        }
+
+      .workspace-shell {
+        display: grid;
+        gap: 24px;
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+
+      .sidebar-sections {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .sidebar-brand {
+        display: grid;
+        gap: 8px;
+      }
+
+      .sidebar-brand h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+
+      .sidebar-brand p {
+        margin: 0;
+        color: var(--text-muted);
+        line-height: 1.45;
+      }
+
+      .sidebar-status {
+        display: grid;
+        gap: 8px;
+      }
+
+      .sidebar-status-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+      }
+
+      .nav-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .sidebar-title {
+        display: none;
+      }
+
+      .sidebar-header {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+
+      .sidebar-toggle {
+        display: none;
+      }
+
+      .nav-button {
+        width: 100%;
+        text-align: center;
+        border-radius: 6px;
+        padding: 10px 6px;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--text-muted);
+        box-shadow: none;
+        transition: transform 140ms ease, background 140ms ease, color 140ms ease;
+      }
+
+      .nav-button strong {
+        font-size: 12px;
+        font-weight: 500;
+        display: block;
+      }
+
+      .nav-button:hover {
+        background: var(--surface-muted);
+        color: var(--text);
+      }
+
+      .nav-button.active {
+        background: var(--surface-muted);
+        color: var(--brand);
+        border-color: var(--border);
+      }
+
+      .nav-button strong {
+        display: block;
+        font-weight: 500;
+      }
+
+      .sidebar-kicker {
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
+
+      h1, h2, h3 {
+        margin-top: 0;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 8px 16px;
+        background: var(--brand);
+        color: #fff;
+        cursor: pointer;
+        font-weight: 500;
+        box-shadow: var(--shadow-soft);
+        font-size: 13px;
+        transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+      }
+
+      button:hover {
+        background: var(--brand-strong);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow);
+      }
+
+      button.secondary {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: none;
+        border: 1px solid var(--border-strong);
+      }
+      
+      button.secondary:hover {
+        background: var(--surface-muted);
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: var(--shadow-soft);
+      }
+
+      .hero-card {
+        background: var(--surface);
+      }
+
+      .app-kicker {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--brand);
+        margin-bottom: 8px;
+      }
+
+      .card-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .card-header p {
+        margin-bottom: 0;
+      }
+
+      .meeting-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .meeting-inline-prep {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .inline-prep-card {
+        display: grid;
+        gap: 18px;
+        padding: 18px;
+        border-radius: 20px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 249, 0.98) 100%);
+      }
+
+      .inline-prep-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .inline-prep-copy {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .inline-prep-copy h3,
+      .inline-prep-copy p {
+        margin-bottom: 0;
+      }
+
+      .inline-prep-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .inline-prep-actions {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .inline-prep-template-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+      }
+
+      .inline-prep-button-row {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+
+      .inline-prep-button-row button,
+      .inline-prep-template-row button {
+        white-space: nowrap;
+      }
+
+      .meeting-card,
+      .connection-card,
+      .health-card,
+      .summary-card,
+      .answer-card,
+      .coach-mode-card,
+      .coach-item,
+      .transcript-item {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        box-shadow: var(--shadow-soft);
+      }
+
+      .qa-thread-shell {
+        min-height: 0;
+        height: min(40vh, 420px);
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .qa-thread-shell.compact {
+        height: min(26vh, 240px);
+      }
+
+      .qa-thread {
+        display: grid;
+        gap: 12px;
+      }
+
+      .qa-message {
+        display: grid;
+        gap: 8px;
+      }
+
+      .qa-message.user {
+        justify-items: end;
+      }
+
+      .qa-bubble {
+        width: min(100%, 680px);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 14px;
+        box-shadow: var(--shadow-soft);
+      }
+
+      .qa-message.user .qa-bubble {
+        background: var(--surface-muted);
+        border-color: rgba(37, 99, 235, 0.18);
+      }
+
+      .qa-message.system .qa-bubble {
+        background: var(--danger-soft);
+        border-color: rgba(239, 68, 68, 0.25);
+      }
+
+      .qa-bubble h3 {
+        margin-bottom: 8px;
+      }
+
+      .qa-bubble p {
+        margin: 0;
+        line-height: 1.55;
+      }
+
+      .meeting-card.selected {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+
+      .meeting-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        cursor: pointer;
+        transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+      }
+
+      .meeting-card:hover {
+        background: var(--surface-muted);
+      }
+
+      .meeting-card-main {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .meeting-card-topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .meeting-card-time {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-muted);
+        letter-spacing: 0.01em;
+      }
+
+      .meeting-card-title {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .meeting-card-subline {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .meeting-card-pill {
+        display: inline-flex;
+        align-items: center;
+        min-width: 0;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .meeting-card-pill.success {
+        background: var(--brand-soft);
+        border-color: rgba(31, 106, 83, 0.18);
+        color: var(--brand-strong);
+      }
+
+      .meeting-card-pill.warning {
+        background: rgba(255, 243, 217, 0.95);
+        border-color: rgba(201, 143, 56, 0.2);
+        color: #8a6118;
+      }
+
+      .meeting-card-pill span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .meeting-card-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .meeting-launch-button {
+        padding: 9px 14px;
+        font-size: 13px;
+        box-shadow: var(--shadow-soft);
+      }
+
+      .meeting-details-button {
+        padding: 9px 14px;
+        font-size: 13px;
+      }
+
+      .meeting-card h3,
+      .coach-item h3,
+      .summary-card h3 {
+        margin-bottom: 8px;
+      }
+
+      .row-between {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .meta-line {
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+
+      .body-copy {
+        margin: 0;
+        color: var(--text-muted);
+        line-height: 1.5;
+      }
+
+      .meeting-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: var(--warning-soft);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #854d0e;
+        border: 1px solid rgba(250, 204, 21, 0.4);
+      }
+
+      .badge.success {
+        background: #ecfdf5;
+        color: #065f46;
+        border: 1px solid rgba(16, 185, 129, 0.2);
+      }
+
+      .badge.neutral {
+        background: #f3f4f6;
+        color: #374151;
+        border: 1px solid rgba(156, 163, 175, 0.2);
+      }
+
+      .popup {
+        border: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      textarea, select, input {
+        width: 100%;
+        box-sizing: border-box;
+        border-radius: 8px;
+        border: 1px solid var(--border-strong);
+        padding: 10px 12px;
+        font: inherit;
+        font-size: 14px;
+        color: var(--text);
+        background: var(--surface);
+        transition: border-color 140ms ease, box-shadow 140ms ease;
+      }
+
+      textarea:focus, select:focus, input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+      }
+
+      ul {
+        padding-left: 18px;
+        margin: 0;
+      }
+
+      .muted {
+        color: var(--text-muted);
+      }
+
+      .field-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .research-note {
+        border-left: 4px solid #1b6b52;
+        padding-left: 12px;
+        margin-top: 10px;
+      }
+
+      .status-banner {
+        display: none;
+        border-radius: 8px;
+        padding: 14px 18px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-soft);
+      }
+
+      .status-banner.error {
+        display: block;
+        background: var(--danger-soft);
+        border-color: rgba(239, 68, 68, 0.4);
+        color: #991b1b;
+      }
+
+      .status-banner.info {
+        display: block;
+      }
+
+      .active-call-shell {
+        display: grid;
+        gap: 20px;
+      }
+
+      .active-call-shell.compact-live {
+        gap: 14px;
+      }
+
+      .active-call-hero {
+        display: grid;
+        gap: 16px;
+      }
+
+      .active-call-shell.compact-live .active-call-hero {
+        padding: 14px 18px;
+      }
+
+      .active-call-shell.compact-live .active-call-hero .eyebrow,
+      .active-call-shell.compact-live .active-call-hero .muted {
+        display: none;
+      }
+
+      .active-call-shell.compact-live .active-call-hero h2 {
+        margin-bottom: 0;
+        font-size: 22px;
+      }
+
+      .active-call-hero .card-header {
+        align-items: center;
+      }
+
+      .active-call-shell.compact-live .active-call-hero .card-header {
+        gap: 12px;
+      }
+
+      .active-call-header {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+        align-items: start;
+      }
+
+      .active-call-header-transcript {
+        grid-column: 1 / -1;
+      }
+
+      .active-call-header.hidden {
+        display: none;
+      }
+
+      .active-call-meta {
+        display: grid;
+        gap: 16px;
+      }
+
+      .active-call-columns {
+        display: block;
+      }
+
+      .active-call-primary {
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+        gap: 20px;
+        align-items: stretch;
+      }
+
+      .active-call-shell.compact-live .active-call-primary {
+        grid-template-columns: minmax(0, 1.12fr) minmax(300px, 0.88fr);
+        gap: 16px;
+      }
+
+      .active-call-column {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-height: 0;
+        align-self: stretch;
+      }
+
+      .active-call-column.secondary {
+        opacity: 0.96;
+      }
+
+      .active-call-qa-card {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 14px;
+        min-height: 0;
+        align-content: start;
+      }
+
+      .active-call-qa-card h2,
+      .active-call-qa-card p {
+        margin-bottom: 0;
+      }
+
+      .active-call-qa-card .meeting-actions {
+        justify-content: flex-start;
+      }
+
+      .section-scroller {
+        min-height: 0;
+        height: min(52vh, 560px);
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .active-call-shell.compact-live .section-scroller {
+        height: min(58vh, 620px);
+      }
+
+      .support-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+      }
+
+      .review-layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      .review-history-panel {
+        display: grid;
+        gap: 16px;
+        position: sticky;
+        top: 28px;
+      }
+
+      .review-session-list {
+        display: grid;
+        gap: 10px;
+        max-height: calc(100vh - 240px);
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .review-session-button {
+        width: 100%;
+        text-align: left;
+        display: grid;
+        gap: 8px;
+        padding: 14px 16px;
+        border-radius: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text);
+        transition: background 140ms ease, border-color 140ms ease;
+      }
+
+      .review-session-button:hover {
+        background: var(--surface-muted);
+      }
+
+      .review-session-button.active {
+        background: var(--surface-muted);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+
+      .review-session-button.active .meta-line,
+      .review-session-button.active .muted {
+        color: var(--text-muted);
+      }
+
+      .review-detail-stack {
+        display: grid;
+        gap: 20px;
+      }
+
+      .review-focus-card {
+        display: grid;
+        gap: 20px;
+      }
+
+      .review-session-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .review-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .review-summary-section {
+        padding: 16px 20px;
+        border-radius: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+      }
+
+      .review-summary-section h3 {
+        margin-bottom: 12px;
+      }
+
+      .review-bullet-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .review-bullet-item {
+        padding: 10px 14px;
+        border-radius: 6px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        line-height: 1.5;
+        font-size: 14px;
+      }
+
+      .review-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .review-panel {
+        display: grid;
+        gap: 14px;
+      }
+
+      .review-panel .section-scroller {
+        height: min(44vh, 420px);
+      }
+
+      .review-tools-grid {
+        align-items: start;
+      }
+
+      .review-qa-card {
+        display: grid;
+        gap: 18px;
+      }
+
+      .review-empty-title {
+        margin-bottom: 8px;
+      }
+
+      .today-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+        margin-top: 16px;
+      }
+
+      .detail-stack {
+        display: grid;
+        gap: 24px;
+        align-content: start;
+      }
+
+      .today-column {
+        min-height: 0;
+      }
+
+      .today-panel {
+        min-height: 0;
+      }
+
+      .today-panel-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .today-panel-header h2,
+      .today-panel-header p {
+        margin-bottom: 0;
+      }
+
+      .today-meetings-list {
+        max-height: calc(100vh - 290px);
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .today-grid .today-panel {
+        max-width: none;
+      }
+
+      .workspace-card {
+        display: grid;
+        gap: 16px;
+      }
+
+      .meeting-modal-shell {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 30;
+      }
+
+      .meeting-modal-shell.open {
+        display: flex;
+      }
+
+      .meeting-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(20, 28, 33, 0.48);
+        backdrop-filter: blur(8px);
+      }
+
+      .meeting-modal {
+        position: relative;
+        width: min(1080px, calc(100vw - 40px));
+        max-height: calc(100vh - 60px);
+        overflow: auto;
+        z-index: 1;
+        padding: 24px;
+        border-radius: 16px;
+        background: var(--surface);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      }
+
+      .meeting-modal-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 24px;
+        align-items: start;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: -24px;
+        background: var(--surface);
+        z-index: 2;
+        padding-top: 4px;
+      }
+
+      .meeting-modal-close {
+        min-width: 96px;
+        flex: 0 0 auto;
+      }
+
+      .workspace-header {
+        display: grid;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .workspace-header h2,
+      .workspace-header p {
+        margin-bottom: 0;
+      }
+
+      .workspace-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .selected-meeting-heading {
+        display: grid;
+        gap: 10px;
+      }
+
+      .selected-meeting-heading h2 {
+        max-width: 920px;
+      }
+
+      .workspace-tab {
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        box-shadow: none;
+      }
+
+      .workspace-tab.active {
+        background: linear-gradient(180deg, var(--brand) 0%, var(--brand-strong) 100%);
+        border-color: transparent;
+        color: #fff;
+        box-shadow: 0 10px 18px rgba(31, 106, 83, 0.16);
+      }
+
+      .workspace-panel {
+        display: none;
+      }
+
+      .workspace-panel.active {
+        display: grid;
+        gap: 14px;
+      }
+
+      .brief-grid {
+        display: none;
+      }
+
+      .brief-layout {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .brief-card {
+        grid-column: span 4;
+        display: grid;
+        gap: 8px;
+        padding: 14px;
+        border-radius: 18px;
+        background: var(--surface-strong);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-soft);
+      }
+
+      .brief-card.half {
+        grid-column: span 6;
+      }
+
+      .brief-card textarea,
+      .brief-card input,
+      .brief-card select {
+        margin: 0;
+      }
+
+      .brief-label {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: rgba(22, 33, 28, 0.56);
+      }
+
+      .brief-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+        gap: 18px;
+        align-items: end;
+      }
+
+      .brief-actions {
+        display: grid;
+        gap: 10px;
+        justify-items: stretch;
+        width: 100%;
+      }
+
+      .brief-template-controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        width: 100%;
+      }
+
+      .brief-primary-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .brief-primary-actions button,
+      .brief-template-controls button,
+      .brief-template-controls select {
+        width: 100%;
+      }
+
+      .brief-header h3,
+      .brief-header p {
+        margin-bottom: 0;
+      }
+
+      .research-scroll {
+        max-height: calc(100vh - 355px);
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .research-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .research-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .research-section {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: var(--surface-strong);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-soft);
+      }
+
+      .research-section h3 {
+        margin-bottom: 10px;
+      }
+
+      .research-section.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .setup-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+      }
+
+      .setup-status-card {
+        grid-column: 1 / -1;
+        padding: 14px 18px;
+      }
+
+      .setup-checklist {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .setup-check {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+      }
+
+      .setup-check.complete {
+        background: rgba(236, 253, 245, 0.9);
+        border-color: rgba(16, 185, 129, 0.18);
+      }
+
+      .setup-check.pending {
+        background: rgba(255, 248, 235, 0.92);
+        border-color: rgba(245, 158, 11, 0.22);
+      }
+
+      .setup-check-copy {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .setup-check-copy strong,
+      .setup-check-copy .meta-line {
+        display: block;
+      }
+
+      .setup-check-copy strong {
+        font-size: 13px;
+        line-height: 1.2;
+      }
+
+      .setup-check-copy .meta-line {
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .setup-updater-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .setup-updater-row .meta-line {
+        flex: 1 1 320px;
+      }
+
+      .setup-check-indicator {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 60px;
+        padding: 6px 8px;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid var(--border-strong);
+        flex: 0 0 auto;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+
+      .setup-check.complete .setup-check-indicator {
+        background: #ecfdf5;
+        border-color: rgba(16, 185, 129, 0.24);
+        color: #047857;
+      }
+
+      .setup-check.pending .setup-check-indicator {
+        background: #fff7ed;
+        border-color: rgba(245, 158, 11, 0.24);
+        color: #b45309;
+      }
+
+      .settings-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 24px;
+        align-items: start;
+      }
+
+      .settings-tab-card {
+        display: grid;
+        gap: 18px;
+        align-content: start;
+      }
+
+      .page {
+        display: none;
+      }
+
+      .page.active {
+        display: grid;
+        gap: 24px;
+      }
+
+      .page-intro {
+        display: grid;
+        gap: 10px;
+      }
+
+      .page-intro.hero-card {
+        padding: 24px 26px;
+      }
+
+      .page-intro h2 {
+        margin-bottom: 0;
+      }
+
+      .page-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .page-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+      }
+
+      .page-chip {
+        padding: 7px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+      }
+
+      .eyebrow {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(22, 33, 28, 0.52);
+        margin-bottom: 8px;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .link-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .link-list a {
+        color: var(--brand-strong);
+        text-decoration: none;
+        word-break: break-all;
+      }
+
+      .link-list a:hover {
+        text-decoration: underline;
+      }
+
+      .attendee-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .attendee-item {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+      }
+
+      .email-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .email-item {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+      }
+
+      .email-item p {
+        margin: 6px 0 0;
+      }
+
+      .session-history-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .session-history-item {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+      }
+
+      .session-history-item p {
+        margin: 6px 0 0;
+      }
+
+      .selected-meeting-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .selected-meeting-heading {
+        display: grid;
+        gap: 6px;
+      }
+
+      .inline-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .stat-tile {
+        padding: 12px 14px;
+        border-radius: 18px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+      }
+
+      .stat-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
+
+      .stat-value {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      .transcript-list,
+      .coaching-list,
+      .evidence-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .transcript-item strong,
+      .coach-item strong {
+        color: var(--text);
+      }
+
+      .transcript-item p,
+      .coach-item p,
+      .summary-card p,
+      .answer-card p {
+        margin: 0;
+        line-height: 1.55;
+      }
+
+      .composer {
+        display: grid;
+        gap: 10px;
+      }
+
+      .composer textarea {
+        resize: vertical;
+        overflow-x: hidden;
+      }
+
+      .section-empty {
+        padding: 18px;
+        border-radius: 18px;
+        background: rgba(248, 249, 247, 0.9);
+        border: 1px dashed var(--border-strong);
+        color: var(--text-muted);
+      }
+
+      @media (max-width: 1100px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+            padding: 16px;
+          border-right: 0;
+          border-bottom: 1px solid rgba(29, 37, 41, 0.08);
+        }
+
+          .workspace-main {
+            padding: 16px;
+          }
+
+        .active-call-header,
+        .active-call-primary,
+        .active-call-columns,
+        .support-grid,
+        .review-layout,
+        .review-summary-grid,
+        .review-detail-grid,
+        .today-grid,
+        .settings-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .review-history-panel {
+          position: static;
+        }
+
+        .review-session-list {
+          max-height: none;
+          overflow: visible;
+          padding-right: 0;
+        }
+
+        .brief-layout,
+        .research-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .brief-card,
+        .brief-card.half {
+          grid-column: 1 / -1;
+        }
+
+        .setup-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .setup-checklist {
+          grid-template-columns: 1fr;
+        }
+
+        .today-meetings-list,
+        .research-scroll {
+          max-height: none;
+          overflow: visible;
+          padding-right: 0;
+        }
+
+        .page-toolbar,
+        .today-panel-header,
+        .workspace-header {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .meeting-modal-shell {
+          padding: 12px;
+          align-items: stretch;
+        }
+
+        .meeting-modal {
+          width: 100%;
+          max-height: calc(100vh - 24px);
+          padding: 14px;
+          border-radius: 20px;
+        }
+
+        .meeting-modal-header,
+        .meeting-card-topline {
+          flex-direction: column;
+          align-items: stretch;
+
+        .brief-header,
+        .brief-template-controls,
+        .brief-primary-actions {
+          grid-template-columns: 1fr;
+        }
+        }
+
+        .meeting-modal-header {
+          top: -14px;
+          grid-template-columns: 1fr;
+        }
+
+        .meeting-modal-close {
+          width: 100%;
+        }
+
+        .meeting-card-actions {
+          width: 100%;
+        }
+
+        .meeting-launch-button {
+          width: 100%;
+        }
+
+        .inline-prep-header {
+          grid-template-columns: 1fr;
+        }
+
+        .inline-prep-template-row,
+        .inline-prep-button-row {
+          grid-template-columns: 1fr;
+          justify-content: stretch;
+        }
+
+        .inline-prep-button-row {
+          display: grid;
+        }
+
+        .section-scroller {
+          height: auto;
+          max-height: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-layout" class="layout">
+      <aside class="panel sidebar">
+        <div class="sidebar-sections">
+          <div class="sidebar-header">
+            <!-- No longer needed -->
+          </div>
+          <div class="nav-list">
+            <button class="nav-button active" data-page="today">
+              <strong>Meetings</strong>
+            </button>
+            <button class="nav-button" data-page="call">
+              <strong>Active Call</strong>
+            </button>
+            <button class="nav-button" data-page="review">
+              <strong>Review</strong>
+            </button>
+            <button class="nav-button" data-page="settings">
+              <strong>Setup</strong>
+            </button>
+          </div>
+        </div>
+      </aside>
+      <main class="panel workspace-main">
+        <div id="status-banner" class="status-banner"></div>
+        <div id="popup"></div>
+        <div id="meeting-modal" class="meeting-modal-shell" aria-hidden="true">
+          <div class="meeting-modal-backdrop" data-close-meeting-modal="true"></div>
+          <div class="card meeting-modal workspace-card" role="dialog" aria-modal="true" aria-labelledby="selected-meeting-title" tabindex="-1">
+            <div class="meeting-modal-header">
+              <div class="workspace-header">
+                <div class="selected-meeting-heading">
+                  <h2 id="selected-meeting-title">Prep Workspace</h2>
+                  <p class="muted">Click any meeting in the queue to review the brief, research, and related history.</p>
+                  <div id="selected-meeting-meta" class="selected-meeting-meta"></div>
+                </div>
+                <div class="workspace-tabs">
+                  <button class="workspace-tab active" data-prep-tab="brief">Brief</button>
+                  <button class="workspace-tab" data-prep-tab="research">Research</button>
+                  <button class="workspace-tab" data-prep-tab="history">History</button>
+                </div>
+              </div>
+              <button id="close-meeting-modal" class="secondary meeting-modal-close">Close</button>
+            </div>
+            <div id="prep-panel-brief" class="workspace-panel active">
+              <div class="brief-header">
+                <div>
+                  <h3>Meeting Brief</h3>
+                  <p class="muted">This context steers live coaching for the selected meeting.</p>
+                </div>
+                <div class="brief-actions">
+                  <div class="brief-template-controls">
+                    <select id="brief-template-select">
+                      <option value="">Choose template</option>
+                    </select>
+                    <button id="apply-meeting-template" class="secondary">Apply Template</button>
+                  </div>
+                  <div class="brief-primary-actions">
+                    <button id="save-meeting-brief" class="secondary">Save Brief</button>
+                    <button id="launch-meeting-from-brief">Launch Call</button>
+                  </div>
+                </div>
+              </div>
+              <div class="brief-layout">
+                <label class="brief-card">
+                  <span class="brief-label">Call Function</span>
+                  <select id="brief-call-function"></select>
+                </label>
+                <label class="brief-card">
+                  <span class="brief-label">Call Type</span>
+                  <select id="brief-call-type"></select>
+                </label>
+                <label class="brief-card">
+                  <span class="brief-label">Call Goal</span>
+                  <input id="brief-call-goal" value="book discovery" />
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Your Role</span>
+                  <input id="brief-user-role" value="AE" />
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Guest Role</span>
+                  <input id="brief-guest-role" value="prospect" />
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Desired Outcome</span>
+                  <textarea id="brief-desired-outcome" rows="7">Leave with a scheduled next step.</textarea>
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Notes</span>
+                  <textarea id="brief-notes" rows="7" placeholder="Account background, agenda, objections, or recruiting calibration notes"></textarea>
+                </label>
+              </div>
+            </div>
+            <div id="prep-panel-research" class="workspace-panel">
+              <div>
+                <h3>Research</h3>
+                <p class="muted">Prospect, organization, attendee, and source context for the selected meeting.</p>
+              </div>
+              <div id="selected-meeting-research" class="research-scroll"></div>
+            </div>
+            <div id="prep-panel-history" class="workspace-panel">
+              <div>
+                <h3>History</h3>
+                <p class="muted">Email history and prior Listen sessions related to the selected meeting.</p>
+              </div>
+              <div id="selected-meeting-history" class="research-scroll"></div>
+            </div>
+          </div>
+        </div>
+        <div class="workspace-shell">
+          <section class="page active" data-page="today">
+            <div class="today-grid">
+              <div class="card today-panel today-column">
+                <div class="today-panel-header">
+                  <div>
+                    <h2>Queue</h2>
+                    <p class="muted">Upcoming meetings stay here. Click a row when you want the full brief and history.</p>
+                  </div>
+                  <div class="meeting-actions">
+                    <button id="refresh-calendars" class="secondary">Refresh</button>
+                  </div>
+                </div>
+                <div class="today-meetings-list">
+                  <div id="meetings" class="meeting-list"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page" data-page="call">
+            <div id="active-call-shell" class="active-call-shell">
+              <div class="card hero-card active-call-hero">
+                <div class="card-header">
+                  <div>
+                    <div class="eyebrow">Active Call</div>
+                    <h2>Call Workspace</h2>
+                    <p class="muted">Stay centered on coaching and in-call questions. Transcript and call diagnostics live behind the details toggle.</p>
+                  </div>
+                  <div class="meeting-actions">
+                    <button id="toggle-active-call-details" class="secondary">Show Call Details</button>
+                    <button id="end-session" class="secondary">End Session</button>
+                  </div>
+                </div>
+              </div>
+              <div id="active-call-header" class="active-call-header hidden">
+                <div class="card active-call-meta">
+                  <div>
+                    <h2>Session Overview</h2>
+                    <div id="active-session">No active session.</div>
+                  </div>
+                </div>
+                <div class="card active-call-meta">
+                  <div>
+                    <h2>Capture Status</h2>
+                    <div id="capture-status">Idle.</div>
+                  </div>
+                  <div id="capture-health" class="stack"></div>
+                </div>
+                <div class="card active-call-column active-call-header-transcript">
+                  <div class="card-header">
+                    <div>
+                      <h2>Transcript</h2>
+                      <p class="muted">Use the live transcript for exact phrasing when you need it, without keeping it in the main workspace.</p>
+                    </div>
+                  </div>
+                  <div id="transcript" class="section-scroller"></div>
+                </div>
+              </div>
+              <div class="active-call-columns">
+                <div class="active-call-primary">
+                  <div class="card active-call-column">
+                    <div class="card-header">
+                      <div>
+                        <h2>Coaching</h2>
+                        <p class="muted">Keep the live nudges front and center while the meeting is happening.</p>
+                      </div>
+                    </div>
+                    <div id="coaching" class="section-scroller"></div>
+                  </div>
+                  <div class="card active-call-qa-card">
+                    <div>
+                      <h2>Ask About This Call</h2>
+                      <p class="muted">Use the live transcript and meeting context when you need a fast answer.</p>
+                    </div>
+                    <div id="active-session-qa"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page" data-page="review">
+            <div class="card hero-card page-intro">
+              <div class="eyebrow">Review</div>
+              <h2>Call History</h2>
+              <p class="muted">Browse previous calls, inspect transcript and coaching detail, and ask follow-up questions against any saved session.</p>
+              <div class="page-chip-row">
+                <span class="page-chip">History</span>
+                <span class="page-chip">Transcript</span>
+                <span class="page-chip">Coaching</span>
+                <span class="page-chip">Q&A</span>
+              </div>
+            </div>
+            <div class="review-layout">
+              <div class="card review-history-panel">
+                <div>
+                  <h2>Previous Calls</h2>
+                  <p class="muted">Choose a saved Listen session to reopen the summary, transcript, and coaching trail.</p>
+                </div>
+                <div class="inline-actions">
+                  <div class="meta-line">Saved sessions from the realtime history store.</div>
+                  <button id="refresh-review-sessions" class="secondary">Refresh</button>
+                </div>
+                <div class="field-grid">
+                  <label>
+                    Search
+                    <input id="review-search-query" placeholder="Search title, headline, type, or goal" />
+                  </label>
+                  <label>
+                    Call function
+                    <select id="review-search-function">
+                      <option value="">All call functions</option>
+                      <option value="sales">Sales</option>
+                      <option value="recruiting">Recruiting</option>
+                      <option value="partnership">Partnership</option>
+                      <option value="internal">Internal</option>
+                    </select>
+                  </label>
+                  <label>
+                    Date
+                    <input id="review-search-date" type="date" />
+                  </label>
+                </div>
+                <div id="review-session-list" class="review-session-list"></div>
+              </div>
+              <div class="review-detail-stack">
+                <div id="review-session-detail" class="card review-focus-card"></div>
+                <div class="card review-qa-card">
+                  <div>
+                    <h2>Ask About This Call</h2>
+                    <p class="muted">Query the selected saved session using its transcript, coaching trail, and stored context.</p>
+                  </div>
+                  <div id="session-qa"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page" data-page="settings">
+            <div class="setup-grid">
+              <div class="card stack setup-status-card">
+                <div>
+                  <h2>Setup Status</h2>
+                  <p class="muted">These are the pieces that only need occasional attention.</p>
+                </div>
+                <div id="setup-overview" class="setup-checklist"></div>
+                <div class="setup-updater-row">
+                  <div id="updater-status" class="meta-line"></div>
+                  <button id="check-for-updates" class="secondary">Check for Updates</button>
+                </div>
+              </div>
+              <div class="card settings-tab-card">
+                <div class="workspace-header">
+                  <div>
+                    <h2>Setup Workspace</h2>
+                    <p class="muted">Switch between the setup areas instead of stacking them all at once.</p>
+                  </div>
+                  <div class="workspace-tabs">
+                    <button class="workspace-tab active" data-setup-tab="connections">Connections</button>
+                    <button class="workspace-tab" data-setup-tab="coaching">Coaching</button>
+                    <button class="workspace-tab" data-setup-tab="org-context">Org Context</button>
+                    <button class="workspace-tab" data-setup-tab="templates">Templates</button>
+                  </div>
+                </div>
+                <div id="setup-panel-connections" class="workspace-panel active">
+                  <div>
+                    <h3>Calendar Connections</h3>
+                    <p class="muted">Connect calendars once, then mostly return to the Meetings page.</p>
+                  </div>
+                  <div id="connections" class="stack"></div>
+                </div>
+                <div id="setup-panel-coaching" class="workspace-panel">
+                  <div>
+                    <h3>Coaching Preferences</h3>
+                    <p class="muted">Set how the AI coach talks to you by default during meetings.</p>
+                  </div>
+                  <div class="field-grid">
+                    <label>
+                      Personal guidance
+                      <textarea id="coaching-guidance" rows="4" placeholder="What should the coach optimize for during your meetings?"></textarea>
+                    </label>
+                    <label>
+                      Coaching style
+                      <select id="coaching-style">
+                        <option value="supportive">Supportive</option>
+                        <option value="direct">Direct</option>
+                        <option value="challenger">Challenger</option>
+                      </select>
+                    </label>
+                    <label>
+                      Directness
+                      <select id="coaching-directness">
+                        <option value="gentle">Gentle</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="blunt">Blunt</option>
+                      </select>
+                    </label>
+                    <label>
+                      Frequency
+                      <select id="coaching-frequency">
+                        <option value="minimal">Minimal</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="proactive">Proactive</option>
+                      </select>
+                    </label>
+                  </div>
+                  <button id="save-coaching-preferences" class="secondary">Save Coaching Preferences</button>
+                </div>
+                <div id="setup-panel-org-context" class="workspace-panel">
+                  <div>
+                    <h3>Org Context Documents</h3>
+                    <p class="muted">Attach marketing docs, messaging, or positioning notes that the coach should use as org context.</p>
+                  </div>
+                  <div id="org-document-list" class="stack"></div>
+                  <div class="field-grid">
+                    <label>
+                      Document title
+                      <input id="org-document-title" placeholder="Positioning guide" />
+                    </label>
+                    <label>
+                      Attach text document
+                      <input id="org-document-file" type="file" accept=".txt,.md,.json,.csv,.log,.text,text/plain,text/markdown,application/json,text/csv" />
+                    </label>
+                    <label>
+                      Google Drive or Google Docs link
+                      <input id="org-document-link" placeholder="https://docs.google.com/document/d/..." />
+                    </label>
+                    <label>
+                      Document content
+                      <textarea id="org-document-content" rows="6" placeholder="Paste marketing copy, ICP notes, objection handling, or product messaging. If you provide a Google Docs link above, content can be imported automatically."></textarea>
+                    </label>
+                  </div>
+                  <button id="save-org-document" class="secondary">Save Org Document</button>
+                </div>
+                <div id="setup-panel-templates" class="workspace-panel">
+                  <div>
+                    <h3>Meeting Templates</h3>
+                    <p class="muted">Save reusable call briefs so common meeting setups do not need to be rewritten each time.</p>
+                  </div>
+                  <div id="meeting-template-list" class="stack"></div>
+                  <div class="field-grid">
+                    <label>
+                      Template title
+                      <input id="meeting-template-title" placeholder="Sales discovery" />
+                    </label>
+                    <label>
+                      Call function
+                      <select id="meeting-template-function">
+                        <option value="sales">Sales</option>
+                        <option value="recruiting">Recruiting</option>
+                        <option value="partnership">Partnership</option>
+                        <option value="internal">Internal</option>
+                      </select>
+                    </label>
+                    <label>
+                      Call type
+                      <input id="meeting-template-type" placeholder="discovery call" />
+                    </label>
+                    <label>
+                      Call goal
+                      <input id="meeting-template-goal" placeholder="book discovery" />
+                    </label>
+                    <label>
+                      User role
+                      <input id="meeting-template-user-role" placeholder="AE" />
+                    </label>
+                    <label>
+                      Guest role
+                      <input id="meeting-template-guest-role" placeholder="prospect" />
+                    </label>
+                    <label>
+                      Desired outcome
+                      <textarea id="meeting-template-outcome" rows="3" placeholder="Leave with a scheduled next step."></textarea>
+                    </label>
+                    <label>
+                      Notes
+                      <textarea id="meeting-template-notes" rows="4" placeholder="Agenda, risks, and role-specific focus."></textarea>
+                    </label>
+                  </div>
+                  <div class="meeting-actions">
+                    <button id="cancel-meeting-template-edit" class="secondary" hidden>Cancel Edit</button>
+                    <button id="save-meeting-template" class="secondary">Save Template</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        snapshot: null,
+        runtimeCapabilities: {
+          cloudTranscriptionConfigured: false,
+        },
+        updater: {
+          enabled: false,
+          availability: "disabled",
+          currentVersion: "0.0.0",
+          availableVersion: null,
+          checkedAt: null,
+          progress: null,
+          message: "Updates are not configured.",
+        },
+        coachingPreferences: {
+          guidance: "",
+          settings: {
+            style: "supportive",
+            directness: "balanced",
+            frequency: "balanced",
+          },
+        },
+        orgDocuments: [],
+        meetingTemplates: [],
+        selectedMeetingTemplateId: "",
+        editingMeetingTemplateId: null,
+        sessionQa: {
+          active: {
+            history: [],
+            pending: false,
+            pendingQuestion: "",
+          },
+          review: {
+            history: [],
+            pending: false,
+            pendingQuestion: "",
+          },
+        },
+        activeCallDetailsExpanded: false,
+        prepTab: "brief",
+        setupTab: "connections",
+        selectedMeetingId: null,
+        meetingModalOpen: false,
+        meetingLaunchPrepOpen: false,
+        sidebarCollapsed: false,
+        meetingContexts: {},
+        meetingLaunchContexts: {},
+        meetingEmailHistory: {},
+        meetingSessionHistory: {},
+        reviewSessions: {
+          status: "idle",
+          note: "",
+          items: [],
+        },
+        selectedReviewSessionId: null,
+        reviewSessionDetails: {},
+        currentPage: "today",
+        lastAutoPage: "today",
+      };
+      const captureState = {
+        sessionId: null,
+        system: null,
+        microphone: null,
+        status: "Idle.",
+      };
+      const speechFallbackState = {
+        recognition: null,
+        sessionId: null,
+        supported: Boolean(window.SpeechRecognition || window.webkitSpeechRecognition),
+        shouldRestart: false,
+        activationTimeoutId: null,
+      };
+
+      const layoutEl = document.getElementById("app-layout");
+      const sidebarToggleEl = document.getElementById("sidebar-toggle");
+    const setupOverviewEl = document.getElementById("setup-overview");
+    const updaterStatusEl = document.getElementById("updater-status");
+    const checkForUpdatesButtonEl = document.getElementById("check-for-updates");
+    const connectionsEl = document.getElementById("connections");
+      const navButtons = Array.from(document.querySelectorAll("[data-page].nav-button"));
+  const prepTabButtons = Array.from(document.querySelectorAll("[data-prep-tab]"));
+      const setupTabButtons = Array.from(document.querySelectorAll("[data-setup-tab]"));
+      const pages = Array.from(document.querySelectorAll(".page"));
+      const meetingsEl = document.getElementById("meetings");
+      const meetingModalEl = document.getElementById("meeting-modal");
+      const meetingModalCardEl = meetingModalEl.querySelector(".meeting-modal");
+      const closeMeetingModalButtonEl = document.getElementById("close-meeting-modal");
+      const selectedMeetingTitleEl = document.getElementById("selected-meeting-title");
+      const selectedMeetingMetaEl = document.getElementById("selected-meeting-meta");
+      const selectedMeetingResearchEl = document.getElementById("selected-meeting-research");
+  const selectedMeetingHistoryEl = document.getElementById("selected-meeting-history");
+      const popupEl = document.getElementById("popup");
+      const activeSessionEl = document.getElementById("active-session");
+      const activeCallShellEl = document.getElementById("active-call-shell");
+      const endSessionButtonEl = document.getElementById("end-session");
+      const activeCallHeaderEl = document.getElementById("active-call-header");
+      const toggleActiveCallDetailsButtonEl = document.getElementById("toggle-active-call-details");
+      const activeSessionQaEl = document.getElementById("active-session-qa");
+      const transcriptEl = document.getElementById("transcript");
+      const coachingEl = document.getElementById("coaching");
+      const sessionQaEl = document.getElementById("session-qa");
+      const reviewSessionListEl = document.getElementById("review-session-list");
+      const reviewSessionDetailEl = document.getElementById("review-session-detail");
+      const reviewSearchQueryEl = document.getElementById("review-search-query");
+      const reviewSearchFunctionEl = document.getElementById("review-search-function");
+      const reviewSearchDateEl = document.getElementById("review-search-date");
+      const captureStatusEl = document.getElementById("capture-status");
+      const captureHealthEl = document.getElementById("capture-health");
+      const statusBannerEl = document.getElementById("status-banner");
+      const briefCallFunctionEl = document.getElementById("brief-call-function");
+      const briefCallTypeEl = document.getElementById("brief-call-type");
+      const briefCallGoalEl = document.getElementById("brief-call-goal");
+      const briefUserRoleEl = document.getElementById("brief-user-role");
+      const briefGuestRoleEl = document.getElementById("brief-guest-role");
+      const briefDesiredOutcomeEl = document.getElementById("brief-desired-outcome");
+      const briefNotesEl = document.getElementById("brief-notes");
+      const briefTemplateSelectEl = document.getElementById("brief-template-select");
+      const applyMeetingTemplateButtonEl = document.getElementById("apply-meeting-template");
+      const launchMeetingFromBriefButtonEl = document.getElementById("launch-meeting-from-brief");
+      const coachingGuidanceEl = document.getElementById("coaching-guidance");
+      const coachingStyleEl = document.getElementById("coaching-style");
+      const coachingDirectnessEl = document.getElementById("coaching-directness");
+      const coachingFrequencyEl = document.getElementById("coaching-frequency");
+      const orgDocumentListEl = document.getElementById("org-document-list");
+      const orgDocumentTitleEl = document.getElementById("org-document-title");
+      const orgDocumentFileEl = document.getElementById("org-document-file");
+      const orgDocumentLinkEl = document.getElementById("org-document-link");
+      const orgDocumentContentEl = document.getElementById("org-document-content");
+      const meetingTemplateListEl = document.getElementById("meeting-template-list");
+      const meetingTemplateTitleEl = document.getElementById("meeting-template-title");
+      const meetingTemplateFunctionEl = document.getElementById("meeting-template-function");
+      const meetingTemplateTypeEl = document.getElementById("meeting-template-type");
+      const meetingTemplateGoalEl = document.getElementById("meeting-template-goal");
+      const meetingTemplateUserRoleEl = document.getElementById("meeting-template-user-role");
+      const meetingTemplateGuestRoleEl = document.getElementById("meeting-template-guest-role");
+      const meetingTemplateOutcomeEl = document.getElementById("meeting-template-outcome");
+      const meetingTemplateNotesEl = document.getElementById("meeting-template-notes");
+      const cancelMeetingTemplateEditButtonEl = document.getElementById("cancel-meeting-template-edit");
+
+      function defaultMeetingContext() {
+        return {
+          callFunction: "sales",
+          callType: "discovery call",
+          callGoal: "book discovery",
+          userRole: "AE",
+          guestRole: "prospect",
+          desiredOutcome: "Leave with a scheduled next step.",
+          notes: "",
+        };
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function normalizeEmail(value) {
+        return String(value || "").trim().toLowerCase();
+      }
+
+      function readSidebarCollapsedPreference() {
+        try {
+          return window.localStorage.getItem("listen.sidebarCollapsed") === "true";
+        } catch {
+          return false;
+        }
+      }
+
+      function syncSidebarState() {
+          // No-Op
+      }
+
+      function syncActiveCallDetails() {
+        const expanded = Boolean(state.activeCallDetailsExpanded);
+        activeCallHeaderEl.classList.toggle("hidden", !expanded);
+        toggleActiveCallDetailsButtonEl.textContent = expanded ? "Hide Call Details" : "Show Call Details";
+        toggleActiveCallDetailsButtonEl.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+
+      function setSidebarCollapsed(collapsed) {
+        state.sidebarCollapsed = Boolean(collapsed);
+        syncSidebarState();
+        try {
+          window.localStorage.setItem("listen.sidebarCollapsed", String(state.sidebarCollapsed));
+        } catch {
+          // Ignore storage failures in restricted Electron sessions.
+        }
+      }
+
+      function looksSyntheticOrganizationName(value) {
+        const trimmed = String(value || "").trim();
+        return /^[a-z]{12,}$/.test(trimmed) || /^[a-z0-9-]{16,}$/.test(trimmed);
+      }
+
+      function isUsefulResearchText(value) {
+        const trimmed = String(value || "").trim();
+        if (!trimmed) {
+          return false;
+        }
+
+        if (/^this snapshot is seeded from calendar/i.test(trimmed)) {
+          return false;
+        }
+
+        return true;
+      }
+
+      function getCurrentUserEmails(snapshot) {
+        const emails = new Set();
+        (snapshot.calendarConnections || []).forEach((connection) => {
+          const match = String(connection.accountLabel || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+          if (match) {
+            emails.add(normalizeEmail(match[0]));
+          }
+        });
+        return emails;
+      }
+
+      function syncMeetingModal() {
+        const isOpen = Boolean(state.meetingModalOpen && state.selectedMeetingId);
+        meetingModalEl.classList.toggle("open", isOpen);
+        meetingModalEl.setAttribute("aria-hidden", isOpen ? "false" : "true");
+        document.body.style.overflow = isOpen ? "hidden" : "";
+      }
+
+      async function closeMeetingModal(options = {}) {
+        const { persistCurrent = true } = options;
+        if (persistCurrent && state.selectedMeetingId) {
+          await persistMeetingBrief(state.selectedMeetingId);
+        }
+
+        state.meetingModalOpen = false;
+        syncMeetingModal();
+        renderMeetings(state.snapshot);
+      }
+
+      async function openMeetingModal(meetingId) {
+        await selectMeeting(meetingId);
+        state.meetingModalOpen = true;
+        syncMeetingModal();
+        renderMeetings(state.snapshot);
+        meetingModalCardEl.focus();
+      }
+
+      function syncPageVisibility() {
+        pages.forEach((page) => {
+          page.classList.toggle("active", page.getAttribute("data-page") === state.currentPage);
+        });
+        navButtons.forEach((button) => {
+          button.classList.toggle("active", button.getAttribute("data-page") === state.currentPage);
+        });
+      }
+
+      function syncPrepPanels() {
+        prepTabButtons.forEach((button) => {
+          button.classList.toggle("active", button.getAttribute("data-prep-tab") === state.prepTab);
+        });
+        document.querySelectorAll(".workspace-panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === `prep-panel-${state.prepTab}`);
+        });
+      }
+
+      function setPrepTab(tab) {
+        state.prepTab = tab;
+        syncPrepPanels();
+      }
+
+      function syncSetupPanels() {
+        setupTabButtons.forEach((button) => {
+          button.classList.toggle("active", button.getAttribute("data-setup-tab") === state.setupTab);
+        });
+        document.querySelectorAll("[id^='setup-panel-']").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === `setup-panel-${state.setupTab}`);
+        });
+      }
+
+      function setSetupTab(tab) {
+        state.setupTab = tab;
+        syncSetupPanels();
+      }
+
+      function setCurrentPage(page) {
+        state.currentPage = page;
+        state.lastAutoPage = page;
+        syncPageVisibility();
+        if (page === "review") {
+          ensureReviewData(state.snapshot);
+        }
+      }
+
+      function getFilteredReviewSessions() {
+        const query = reviewSearchQueryEl.value.trim().toLowerCase();
+        const callFunction = reviewSearchFunctionEl.value;
+        const date = reviewSearchDateEl.value;
+
+        return state.reviewSessions.items.filter((session) => {
+          const haystack = [session.meetingTitle, session.summary?.headline, session.context?.callType, session.context?.callGoal]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          const matchesQuery = !query || haystack.includes(query);
+          const matchesFunction = !callFunction || session.context?.callFunction === callFunction;
+          const matchesDate = !date || String(session.completedAt || "").startsWith(date);
+          return matchesQuery && matchesFunction && matchesDate;
+        });
+      }
+
+      function getSelectedReviewSession(items = state.reviewSessions.items) {
+        return items.find((item) => item.sessionId === state.selectedReviewSessionId) || null;
+      }
+
+      async function syncReviewFilterSelection() {
+        const filteredItems = getFilteredReviewSessions();
+        const currentVisible = state.selectedReviewSessionId && filteredItems.some((item) => item.sessionId === state.selectedReviewSessionId);
+        if (currentVisible) {
+          renderReviewWorkspace(state.snapshot);
+          renderSessionQa(state.snapshot);
+          return;
+        }
+
+        await selectReviewSession(filteredItems[0]?.sessionId || null, { preserveQuestion: false });
+      }
+
+      async function loadReviewSessions(options = {}) {
+        const { force = false } = options;
+        if (!force && (state.reviewSessions.status === "loading" || state.reviewSessions.status === "ready")) {
+          return state.reviewSessions.items;
+        }
+
+        state.reviewSessions = {
+          status: "loading",
+          note: "Loading saved Listen sessions...",
+          items: state.reviewSessions.items || [],
+        };
+        renderReviewWorkspace(state.snapshot);
+
+        try {
+          const items = await window.listenBridge.listSessions(20);
+          state.reviewSessions = {
+            status: "ready",
+            note: items.length ? "Recent calls captured by Listen." : "No saved calls yet. Finish one call and it will appear here.",
+            items,
+          };
+
+          const stillSelected = state.selectedReviewSessionId && items.some((item) => item.sessionId === state.selectedReviewSessionId);
+          if (!stillSelected) {
+            const preferredSessionId = state.snapshot?.lastSummary?.sessionId;
+            const nextSessionId = items.find((item) => item.sessionId === preferredSessionId)?.sessionId || items[0]?.sessionId || null;
+            state.selectedReviewSessionId = nextSessionId;
+          }
+
+          if (state.selectedReviewSessionId) {
+            await loadReviewSessionDetail(state.selectedReviewSessionId);
+          }
+        } catch (error) {
+          state.reviewSessions = {
+            status: "error",
+            note: error instanceof Error ? error.message : String(error),
+            items: [],
+          };
+        }
+
+        renderReviewWorkspace(state.snapshot);
+        renderSessionQa(state.snapshot);
+        return state.reviewSessions.items;
+      }
+
+      async function loadReviewSessionDetail(sessionId, options = {}) {
+        const { force = false } = options;
+        if (!sessionId) {
+          return null;
+        }
+
+        const existing = state.reviewSessionDetails[sessionId];
+        if (!force && existing && existing.status !== "idle" && existing.status !== "error") {
+          return existing;
+        }
+
+        state.reviewSessionDetails[sessionId] = {
+          status: "loading",
+          note: "Loading transcript and coaching detail...",
+          detail: existing?.detail || null,
+        };
+        renderReviewWorkspace(state.snapshot);
+
+        try {
+          const detail = await window.listenBridge.getSession(sessionId);
+          state.reviewSessionDetails[sessionId] = {
+            status: "ready",
+            note: "",
+            detail,
+          };
+        } catch (error) {
+          state.reviewSessionDetails[sessionId] = {
+            status: "error",
+            note: error instanceof Error ? error.message : String(error),
+            detail: null,
+          };
+        }
+
+        renderReviewWorkspace(state.snapshot);
+        return state.reviewSessionDetails[sessionId];
+      }
+
+      async function selectReviewSession(sessionId, options = {}) {
+        const { preserveQuestion = true } = options;
+        if (!sessionId) {
+          state.selectedReviewSessionId = null;
+          renderReviewWorkspace(state.snapshot);
+          renderSessionQa(state.snapshot);
+          return;
+        }
+
+        state.selectedReviewSessionId = sessionId;
+        state.sessionQa.review.answer = null;
+        state.sessionQa.review.error = "";
+        state.sessionQa.review.pending = false;
+        if (!preserveQuestion) {
+          state.sessionQa.review.question = "";
+        }
+        renderReviewWorkspace(state.snapshot);
+        renderSessionQa(state.snapshot);
+        await loadReviewSessionDetail(sessionId);
+      }
+
+      function ensureReviewData(snapshot) {
+        if (!snapshot) {
+          return;
+        }
+
+        if (state.reviewSessions.status === "idle") {
+          void loadReviewSessions();
+          return;
+        }
+
+        const latestSummaryId = snapshot.lastSummary?.sessionId || null;
+        if (
+          latestSummaryId
+          && state.reviewSessions.status === "ready"
+          && !state.reviewSessions.items.some((item) => item.sessionId === latestSummaryId)
+        ) {
+          void loadReviewSessions({ force: true });
+          return;
+        }
+
+        const hasSelectedSession = state.selectedReviewSessionId
+          && state.reviewSessions.items.some((item) => item.sessionId === state.selectedReviewSessionId);
+
+        if (!hasSelectedSession && state.reviewSessions.status === "ready") {
+          const fallbackSessionId = state.reviewSessions.items.find((item) => item.sessionId === latestSummaryId)?.sessionId || state.reviewSessions.items[0]?.sessionId || null;
+          if (fallbackSessionId) {
+            void selectReviewSession(fallbackSessionId, { preserveQuestion: false });
+          }
+          return;
+        }
+
+        if (state.selectedReviewSessionId) {
+          const detailState = state.reviewSessionDetails[state.selectedReviewSessionId];
+          if (!detailState || detailState.status === "idle") {
+            void loadReviewSessionDetail(state.selectedReviewSessionId);
+          }
+        }
+      }
+
+      function syncWorkflowPage(snapshot) {
+        if (snapshot.activeSession) {
+          if (state.currentPage !== "call") {
+            state.currentPage = "call";
+            syncPageVisibility();
+          }
+          state.lastAutoPage = "call";
+          return;
+        }
+
+        if (state.lastAutoPage === "call" && snapshot.lastSummary) {
+          state.currentPage = "review";
+          state.lastAutoPage = "review";
+          syncPageVisibility();
+          return;
+        }
+
+        if (!["settings", "review"].includes(state.currentPage)) {
+          state.currentPage = "today";
+          state.lastAutoPage = "today";
+          syncPageVisibility();
+        }
+      }
+
+      function applyCoachingPreferences(preferences) {
+        state.coachingPreferences = preferences;
+        coachingGuidanceEl.value = preferences.guidance || "";
+        coachingStyleEl.value = preferences.settings?.style || "supportive";
+        coachingDirectnessEl.value = preferences.settings?.directness || "balanced";
+        coachingFrequencyEl.value = preferences.settings?.frequency || "balanced";
+      }
+
+      function applyMeetingContext(context) {
+        const safeContext = context || defaultMeetingContext();
+        briefCallFunctionEl.value = safeContext.callFunction || "sales";
+        syncCallTypeOptions();
+        briefCallTypeEl.value = safeContext.callType || briefCallTypeEl.value;
+        briefCallGoalEl.value = safeContext.callGoal || "";
+        briefUserRoleEl.value = safeContext.userRole || "";
+        briefGuestRoleEl.value = safeContext.guestRole || "";
+        briefDesiredOutcomeEl.value = safeContext.desiredOutcome || "";
+        briefNotesEl.value = safeContext.notes || "";
+      }
+
+      function renderOrgDocuments() {
+        orgDocumentListEl.innerHTML = state.orgDocuments.length
+          ? state.orgDocuments
+              .map((document) => `
+                <div class="card">
+                  <strong>${document.title}</strong>
+                  <div class="muted">${document.sourceName || "manual"}${document.mimeType ? ` / ${document.mimeType}` : ""}${document.sourceUrl ? ` / <a href="${document.sourceUrl}" target="_blank" rel="noreferrer">source link</a>` : ""}</div>
+                  <p>${document.content.slice(0, 180)}${document.content.length > 180 ? "..." : ""}</p>
+                  <div class="meeting-actions">
+                    <button class="secondary" data-delete-org-document="${document.id}">Delete</button>
+                  </div>
+                </div>
+              `)
+              .join("")
+          : "<p class=\"muted\">No org context documents attached yet.</p>";
+
+        document.querySelectorAll("[data-delete-org-document]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await runUiAction("Deleting org document...", () => window.listenBridge.deleteOrgDocument(button.getAttribute("data-delete-org-document")));
+            state.orgDocuments = await window.listenBridge.listOrgDocuments();
+            renderOrgDocuments();
+          });
+        });
+      }
+
+      function renderMeetingTemplates() {
+        meetingTemplateListEl.innerHTML = state.meetingTemplates.length
+          ? state.meetingTemplates
+              .map((template) => `
+                <div class="card">
+                  <strong>${escapeHtml(template.title)}</strong>
+                  <div class="muted">${escapeHtml(template.context.callFunction)} / ${escapeHtml(template.context.callType)}</div>
+                  <p>${escapeHtml(template.context.desiredOutcome || "No desired outcome saved.")}</p>
+                  <div class="meeting-actions">
+                    <button class="secondary" data-apply-template-id="${escapeHtml(template.id)}" ${state.selectedMeetingId ? "" : "disabled"}>Use For Selected Meeting</button>
+                    <button class="secondary" data-edit-template-id="${escapeHtml(template.id)}">Edit</button>
+                    <button class="secondary" data-delete-template-id="${escapeHtml(template.id)}">Delete</button>
+                  </div>
+                </div>
+              `)
+              .join("")
+          : '<p class="muted">No meeting templates saved yet.</p>';
+
+        document.querySelectorAll("[data-apply-template-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const templateId = button.getAttribute("data-apply-template-id");
+            if (!templateId) {
+              return;
+            }
+
+            state.selectedMeetingTemplateId = templateId;
+            renderMeetingTemplatePicker();
+            await runUiAction("Applying meeting template...", () => applySelectedMeetingTemplate());
+            if (state.selectedMeetingId) {
+              setCurrentPage("today");
+              setPrepTab("brief");
+              state.meetingModalOpen = true;
+              syncMeetingModal();
+              renderMeetings(state.snapshot);
+              meetingModalCardEl.focus();
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-edit-template-id]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const templateId = button.getAttribute("data-edit-template-id");
+            const template = state.meetingTemplates.find((item) => item.id === templateId);
+            if (!template) {
+              return;
+            }
+
+            loadMeetingTemplateIntoEditor(template);
+            setSetupTab("templates");
+          });
+        });
+
+        document.querySelectorAll("[data-delete-template-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const templateId = button.getAttribute("data-delete-template-id");
+            if (!templateId) {
+              return;
+            }
+
+            await runUiAction("Deleting meeting template...", () => window.listenBridge.deleteMeetingTemplate(templateId));
+            if (state.selectedMeetingTemplateId === templateId) {
+              state.selectedMeetingTemplateId = "";
+            }
+            if (state.editingMeetingTemplateId === templateId) {
+              resetMeetingTemplateEditor();
+            }
+            state.meetingTemplates = await window.listenBridge.listMeetingTemplates();
+            renderMeetingTemplates();
+            renderMeetingTemplatePicker();
+            renderSetupStatus(state.snapshot);
+          });
+        });
+      }
+
+      function renderMeetingTemplatePicker() {
+        briefTemplateSelectEl.innerHTML = [
+          '<option value="">Choose template</option>',
+          ...state.meetingTemplates.map((template) => `<option value="${escapeHtml(template.id)}" ${template.id === state.selectedMeetingTemplateId ? "selected" : ""}>${escapeHtml(template.title)}</option>`),
+        ].join("");
+
+        applyMeetingTemplateButtonEl.disabled = !state.selectedMeetingId || !state.selectedMeetingTemplateId;
+      }
+
+      function buildMeetingTemplateContext() {
+        return {
+          callFunction: meetingTemplateFunctionEl.value,
+          callType: meetingTemplateTypeEl.value.trim(),
+          callGoal: meetingTemplateGoalEl.value.trim(),
+          userRole: meetingTemplateUserRoleEl.value.trim(),
+          guestRole: meetingTemplateGuestRoleEl.value.trim(),
+          desiredOutcome: meetingTemplateOutcomeEl.value.trim(),
+          notes: meetingTemplateNotesEl.value.trim(),
+        };
+      }
+
+      function resetMeetingTemplateEditor() {
+        state.editingMeetingTemplateId = null;
+        meetingTemplateTitleEl.value = "";
+        meetingTemplateTypeEl.value = "";
+        meetingTemplateGoalEl.value = "";
+        meetingTemplateUserRoleEl.value = "";
+        meetingTemplateGuestRoleEl.value = "";
+        meetingTemplateOutcomeEl.value = "";
+        meetingTemplateNotesEl.value = "";
+        meetingTemplateFunctionEl.value = "sales";
+        cancelMeetingTemplateEditButtonEl.hidden = true;
+        document.getElementById("save-meeting-template").textContent = "Save Template";
+      }
+
+      function loadMeetingTemplateIntoEditor(template) {
+        state.editingMeetingTemplateId = template.id;
+        meetingTemplateTitleEl.value = template.title || "";
+        meetingTemplateFunctionEl.value = template.context.callFunction || "sales";
+        meetingTemplateTypeEl.value = template.context.callType || "";
+        meetingTemplateGoalEl.value = template.context.callGoal || "";
+        meetingTemplateUserRoleEl.value = template.context.userRole || "";
+        meetingTemplateGuestRoleEl.value = template.context.guestRole || "";
+        meetingTemplateOutcomeEl.value = template.context.desiredOutcome || "";
+        meetingTemplateNotesEl.value = template.context.notes || "";
+        cancelMeetingTemplateEditButtonEl.hidden = false;
+        document.getElementById("save-meeting-template").textContent = "Update Template";
+      }
+
+      async function applySelectedMeetingTemplate() {
+        if (!state.selectedMeetingId) {
+          setStatusBanner("error", "Select a meeting first.");
+          return;
+        }
+
+        const template = state.meetingTemplates.find((item) => item.id === state.selectedMeetingTemplateId);
+        if (!template) {
+          setStatusBanner("error", "Choose a saved template first.");
+          return;
+        }
+
+        applyMeetingContext(template.context);
+        state.meetingContexts[state.selectedMeetingId] = { ...template.context };
+        await persistMeetingBrief(state.selectedMeetingId);
+      }
+
+      const callTypeOptions = {
+        sales: ["outbound prospecting", "discovery call", "demo", "follow-up", "negotiation", "renewal"],
+        recruiting: ["recruiter screen", "hiring manager screen", "panel interview", "closing call"],
+        partnership: ["intro call", "qualification", "solution alignment", "negotiation"],
+        internal: ["1:1", "pipeline review", "forecast call", "project sync", "performance discussion"],
+      };
+
+      function setStatusBanner(kind, message) {
+        statusBannerEl.className = `status-banner ${kind}`;
+        statusBannerEl.textContent = message;
+      }
+
+      function clearStatusBanner() {
+        statusBannerEl.className = "status-banner";
+        statusBannerEl.textContent = "";
+      }
+
+      function formatError(error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+
+      async function runUiAction(message, action) {
+        setStatusBanner("info", message);
+        try {
+          const result = await action();
+          clearStatusBanner();
+          return result;
+        } catch (error) {
+          setStatusBanner("error", formatError(error));
+          throw error;
+        }
+      }
+
+      function setCaptureStatus(message) {
+        captureState.status = message;
+        captureStatusEl.textContent = message;
+      }
+
+      function getSpeechRecognitionCtor() {
+        return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+      }
+
+      function formatDate(value) {
+        return new Date(value).toLocaleString();
+      }
+
+      function formatMeetingTimeRange(startsAt, endsAt) {
+        const start = new Date(startsAt);
+        const end = new Date(endsAt);
+        return `${start.toLocaleDateString([], { month: "short", day: "numeric" })} ${start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} - ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+      }
+
+      function renderSetupStatus(snapshot) {
+        const connectedCalendars = snapshot.calendarConnections.filter((connection) => connection.provider !== "mock" && connection.connected).length;
+        const hasOrgDocs = state.orgDocuments.length > 0;
+        const hasTemplates = state.meetingTemplates.length > 0;
+        setupOverviewEl.innerHTML = [
+          {
+            title: "Connect calendar",
+            detail: connectedCalendars ? `Connected accounts: ${connectedCalendars}` : "Connect Google or Microsoft so meetings sync automatically.",
+            complete: connectedCalendars > 0,
+          },
+          {
+            title: "Set coaching defaults",
+            detail: state.coachingPreferences.guidance?.trim() ? "Personal guidance is saved." : "Add guidance so the coach has a default stance.",
+            complete: Boolean(state.coachingPreferences.guidance?.trim()),
+          },
+          {
+            title: "Load org context",
+            detail: hasOrgDocs ? `${state.orgDocuments.length} org documents available.` : "Attach docs, messaging, or notes for better prep and coaching.",
+            complete: hasOrgDocs,
+          },
+          {
+            title: "Save meeting templates",
+            detail: hasTemplates ? `${state.meetingTemplates.length} reusable call briefs saved.` : "Save repeatable call setups so meeting briefs start from a stronger baseline.",
+            complete: hasTemplates,
+          },
+        ]
+          .map((item) => `
+            <div class="setup-check ${item.complete ? "complete" : "pending"}">
+              <span class="setup-check-indicator">${item.complete ? "Ready" : "Next"}</span>
+              <div class="setup-check-copy">
+                <strong>${item.title}</strong>
+                <div class="meta-line">${item.detail}</div>
+              </div>
+            </div>
+          `)
+          .join("");
+        renderUpdaterStatus();
+      }
+
+      function getUpdaterActionLabel() {
+        if (state.updater.availability === "checking") {
+          return "Checking...";
+        }
+
+        if (state.updater.availability === "downloading") {
+          return state.updater.progress === null ? "Downloading..." : `Downloading ${state.updater.progress}%`;
+        }
+
+        if (state.updater.availability === "downloaded") {
+          return "Install Update";
+        }
+
+        return "Check for Updates";
+      }
+
+      function renderUpdaterStatus() {
+        const versionLine = state.updater.availableVersion
+          ? `Current ${escapeHtml(state.updater.currentVersion)} · Latest ${escapeHtml(state.updater.availableVersion)}`
+          : `Current ${escapeHtml(state.updater.currentVersion)}`;
+        const checkedLine = state.updater.checkedAt ? ` · Checked ${escapeHtml(formatDate(state.updater.checkedAt))}` : "";
+        updaterStatusEl.innerHTML = `${escapeHtml(state.updater.message)}<br>${versionLine}${checkedLine}`;
+        checkForUpdatesButtonEl.textContent = getUpdaterActionLabel();
+        checkForUpdatesButtonEl.disabled = state.updater.availability === "checking" || state.updater.availability === "downloading";
+      }
+
+      function populateCallFunctionOptions() {
+        briefCallFunctionEl.innerHTML = Object.keys(callTypeOptions)
+          .map((callFunction) => `<option value="${callFunction}">${callFunction}</option>`)
+          .join("");
+        briefCallFunctionEl.value = "sales";
+        syncCallTypeOptions();
+      }
+
+      function syncCallTypeOptions() {
+        const options = callTypeOptions[briefCallFunctionEl.value] || [];
+        const current = briefCallTypeEl.value;
+        briefCallTypeEl.innerHTML = options.map((callType) => `<option value="${callType}">${callType}</option>`).join("");
+        briefCallTypeEl.value = options.includes(current) ? current : options[0] || "";
+      }
+
+      function buildMeetingContext() {
+        return {
+          callFunction: briefCallFunctionEl.value,
+          callType: briefCallTypeEl.value,
+          callGoal: briefCallGoalEl.value.trim(),
+          userRole: briefUserRoleEl.value.trim(),
+          guestRole: briefGuestRoleEl.value.trim(),
+          desiredOutcome: briefDesiredOutcomeEl.value.trim(),
+          notes: briefNotesEl.value.trim(),
+        };
+      }
+
+      function clipContextText(value, maxLength = 220) {
+        const normalized = String(value || "").trim().replace(/\s+/g, " ");
+        if (!normalized) {
+          return "";
+        }
+
+        return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+      }
+
+      function buildMeetingOverviewContextBlock(meeting, baseContext) {
+        if (!meeting) {
+          return "";
+        }
+
+        const lines = [
+          `Meeting: ${meeting.title}`,
+          `When: ${formatMeetingTimeRange(meeting.startsAt, meeting.endsAt)}`,
+        ];
+        const attendeeNames = (meeting.attendees || [])
+          .map((attendee) => clipContextText(attendee.fullName || attendee.email || "", 80))
+          .filter(Boolean)
+          .slice(0, 6);
+
+        if (attendeeNames.length) {
+          lines.push(`Guests: ${attendeeNames.join(", ")}`);
+        }
+
+        if (meeting.notes && clipContextText(meeting.notes, 280)) {
+          lines.push(`Calendar notes: ${clipContextText(meeting.notes, 280)}`);
+        }
+
+        if (baseContext?.callGoal) {
+          lines.push(`Call goal: ${clipContextText(baseContext.callGoal, 180)}`);
+        }
+
+        if (baseContext?.desiredOutcome) {
+          lines.push(`Desired outcome: ${clipContextText(baseContext.desiredOutcome, 180)}`);
+        }
+
+        return lines.join("\n");
+      }
+
+      function buildResearchContextBlock(meeting) {
+        const lines = [];
+        const personSummary = clipContextText(meeting?.research?.personSummary, 260);
+        const orgSummary = clipContextText(meeting?.research?.organizationSummary, 260);
+        const signals = (meeting?.research?.recentSignals || [])
+          .map((signal) => clipContextText(signal, 180))
+          .filter(Boolean)
+          .slice(0, 4);
+
+        if (personSummary) {
+          lines.push(`Prospect summary: ${personSummary}`);
+        }
+
+        if (orgSummary) {
+          lines.push(`Organization summary: ${orgSummary}`);
+        }
+
+        if (signals.length) {
+          lines.push(`Recent signals:\n${signals.map((signal) => `- ${signal}`).join("\n")}`);
+        }
+
+        return lines.length ? lines.join("\n") : "";
+      }
+
+      function buildEmailHistoryContextBlock(emailHistory) {
+        if (!emailHistory || emailHistory.status !== "ready" || !emailHistory.messages?.length) {
+          return "";
+        }
+
+        const messages = emailHistory.messages
+          .slice(0, 5)
+          .map((message) => {
+            const subject = (message.subject || "No subject").trim();
+            const sender = (message.from || "Unknown sender").trim();
+            const snippet = (message.snippet || "").trim();
+            const trimmedSnippet = clipContextText(snippet, 220);
+            return `- ${subject} (${sender})${trimmedSnippet ? `: ${trimmedSnippet}` : ""}`;
+          })
+          .join("\n");
+
+        return messages ? `Guest email history:\n${messages}` : "";
+      }
+
+      function buildSessionHistoryContextBlock(sessionHistory) {
+        if (!sessionHistory || sessionHistory.status !== "ready" || !sessionHistory.sessions?.length) {
+          return "";
+        }
+
+        const sessions = sessionHistory.sessions
+          .slice(0, 3)
+          .map((session) => {
+            const title = clipContextText(session.meetingTitle, 120);
+            const headline = clipContextText(session.headline, 180);
+            const reason = clipContextText(session.matchReason, 140);
+            const transcriptNote = clipContextText(session.transcriptNote, 220);
+            return `- ${title}${headline ? `: ${headline}` : ""}${reason ? ` (${reason})` : ""}${transcriptNote ? ` | Transcript notes: ${transcriptNote}` : ""}`;
+          })
+          .join("\n");
+
+        return sessions ? `Related prior meetings:\n${sessions}` : "";
+      }
+
+      function buildCombinedMeetingContextNotes(meeting, baseContext, emailHistory, sessionHistory) {
+        const sections = [];
+        const userNotes = clipContextText(baseContext?.notes, 600);
+        const overview = buildMeetingOverviewContextBlock(meeting, baseContext);
+        const research = buildResearchContextBlock(meeting);
+        const emailContext = buildEmailHistoryContextBlock(emailHistory);
+        const priorMeetings = buildSessionHistoryContextBlock(sessionHistory);
+
+        if (userNotes) {
+          sections.push(`Your meeting notes:\n${userNotes}`);
+        }
+
+        if (overview) {
+          sections.push(`Meeting overview:\n${overview}`);
+        }
+
+        if (research) {
+          sections.push(`Research summary:\n${research}`);
+        }
+
+        if (emailContext) {
+          sections.push(emailContext);
+        }
+
+        if (priorMeetings) {
+          sections.push(priorMeetings);
+        }
+
+        return sections.join("\n\n").trim();
+      }
+
+      function buildMeetingLaunchContextCacheKey(meeting, baseContext, emailHistory, sessionHistory) {
+        return JSON.stringify({
+          meeting: meeting
+            ? {
+                id: meeting.id,
+                externalId: meeting.externalId || "",
+                title: meeting.title || "",
+                startsAt: meeting.startsAt || "",
+                endsAt: meeting.endsAt || "",
+                notes: meeting.notes || "",
+                researchUpdatedAt: meeting.research?.updatedAt || "",
+                researchStatus: meeting.research?.status || "",
+              }
+            : null,
+          brief: {
+            callFunction: baseContext?.callFunction || "",
+            callType: baseContext?.callType || "",
+            callGoal: baseContext?.callGoal || "",
+            userRole: baseContext?.userRole || "",
+            guestRole: baseContext?.guestRole || "",
+            desiredOutcome: baseContext?.desiredOutcome || "",
+            notes: baseContext?.notes || "",
+          },
+          emailHistory: emailHistory
+            ? {
+                status: emailHistory.status,
+                note: emailHistory.note,
+                messages: (emailHistory.messages || []).map((message) => ({
+                  id: message.id,
+                  from: message.from,
+                  subject: message.subject,
+                  date: message.date,
+                  snippet: message.snippet,
+                })),
+              }
+            : null,
+          sessionHistory: sessionHistory
+            ? {
+                status: sessionHistory.status,
+                note: sessionHistory.note,
+                sessions: (sessionHistory.sessions || []).map((session) => ({
+                  sessionId: session.sessionId,
+                  meetingTitle: session.meetingTitle,
+                  completedAt: session.completedAt,
+                  headline: session.headline,
+                  matchReason: session.matchReason,
+                })),
+              }
+            : null,
+        });
+      }
+
+      async function buildLaunchMeetingContext(meetingId, baseContext) {
+        const meeting = state.snapshot?.upcomingMeetings?.find((item) => item.id === meetingId) || null;
+        const context = {
+          ...(baseContext || defaultMeetingContext()),
+          notes: (baseContext?.notes || "").trim(),
+        };
+
+        const [emailHistory, sessionHistory] = await Promise.all([
+          loadMeetingEmailHistory(meetingId),
+          loadMeetingSessionHistory(meetingId),
+        ]);
+
+        const cacheKey = buildMeetingLaunchContextCacheKey(meeting, context, emailHistory, sessionHistory);
+        const cachedLaunchContext = state.meetingLaunchContexts[meetingId]
+          || await window.listenBridge.getMeetingLaunchContext(meetingId);
+
+        if (cachedLaunchContext?.cacheKey === cacheKey && cachedLaunchContext?.context) {
+          state.meetingLaunchContexts[meetingId] = cachedLaunchContext;
+          return cachedLaunchContext.context;
+        }
+
+        const combinedNotes = buildCombinedMeetingContextNotes(meeting, context, emailHistory, sessionHistory);
+        const launchContext = {
+          ...context,
+          notes: combinedNotes,
+        };
+        const launchContextPayload = {
+          cacheKey,
+          context: launchContext,
+        };
+
+        state.meetingLaunchContexts[meetingId] = launchContextPayload;
+        await window.listenBridge.saveMeetingLaunchContext(meetingId, launchContextPayload);
+
+        return launchContext;
+      }
+
+      async function launchMeetingWithPreparedContext(meetingId) {
+        if (!meetingId) {
+          return;
+        }
+
+        if (state.selectedMeetingId === meetingId) {
+          await persistMeetingBrief(meetingId);
+        }
+
+        const baseContext = state.selectedMeetingId === meetingId
+          ? buildMeetingContext()
+          : state.meetingContexts[meetingId] || (await window.listenBridge.getMeetingBrief(meetingId)) || defaultMeetingContext();
+        const meetingContext = await buildLaunchMeetingContext(meetingId, baseContext);
+        const snapshot = await runUiAction("Launching meeting and starting capture...", () =>
+          window.listenBridge.launchMeeting(meetingId, meetingContext)
+        );
+        state.meetingLaunchPrepOpen = false;
+        await render(snapshot);
+        await ensureCaptureForSnapshot(snapshot);
+      }
+
+      function buildInlineMeetingPrepMarkup(meeting) {
+        const context = state.meetingContexts[meeting.id] || defaultMeetingContext();
+        const attendeeCount = meeting.attendees?.length || 0;
+        return `
+          <div class="meeting-inline-prep">
+            <div class="card inline-prep-card">
+              <div class="inline-prep-header">
+                <div class="inline-prep-copy">
+                  <h3>Prepare ${escapeHtml(meeting.title)}</h3>
+                  <p class="muted">Set the brief before starting capture for this meeting.</p>
+                  <div class="inline-prep-meta">
+                    <div class="meeting-card-pill"><span>${escapeHtml(formatMeetingTimeRange(meeting.startsAt, meeting.endsAt))}</span></div>
+                    <div class="meeting-card-pill"><span>${escapeHtml(meeting.provider.replaceAll("_", " "))}</span></div>
+                    <div class="meeting-card-pill"><span>${attendeeCount} attendee${attendeeCount === 1 ? "" : "s"}</span></div>
+                  </div>
+                </div>
+                <div class="inline-prep-actions">
+                  <div class="inline-prep-template-row">
+                    <select id="inline-brief-template-select">
+                      <option value="">Choose template</option>
+                      ${state.meetingTemplates.map((template) => `<option value="${escapeHtml(template.id)}" ${template.id === state.selectedMeetingTemplateId ? "selected" : ""}>${escapeHtml(template.title)}</option>`).join("")}
+                    </select>
+                    <button id="inline-apply-meeting-template" class="secondary">Apply Template</button>
+                  </div>
+                  <div class="inline-prep-button-row">
+                    <button id="inline-open-meeting-details" class="secondary">Details</button>
+                    <button id="inline-save-meeting-brief" class="secondary">Save Brief</button>
+                    <button id="inline-launch-meeting">Launch Call</button>
+                  </div>
+                </div>
+              </div>
+              <div class="brief-layout">
+                <label class="brief-card">
+                  <span class="brief-label">Call Function</span>
+                  <select id="inline-brief-call-function"></select>
+                </label>
+                <label class="brief-card">
+                  <span class="brief-label">Call Type</span>
+                  <select id="inline-brief-call-type"></select>
+                </label>
+                <label class="brief-card">
+                  <span class="brief-label">Call Goal</span>
+                  <input id="inline-brief-call-goal" value="${escapeHtml(context.callGoal || "")}" />
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Your Role</span>
+                  <input id="inline-brief-user-role" value="${escapeHtml(context.userRole || "")}" />
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Guest Role</span>
+                  <input id="inline-brief-guest-role" value="${escapeHtml(context.guestRole || "")}" />
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Desired Outcome</span>
+                  <textarea id="inline-brief-desired-outcome" rows="7">${escapeHtml(context.desiredOutcome || "")}</textarea>
+                </label>
+                <label class="brief-card half">
+                  <span class="brief-label">Notes</span>
+                  <textarea id="inline-brief-notes" rows="7" placeholder="Account background, agenda, objections, or recruiting calibration notes">${escapeHtml(context.notes || "")}</textarea>
+                </label>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      async function persistMeetingBrief(meetingId) {
+        if (!meetingId) {
+          return null;
+        }
+
+        const context = buildMeetingContext();
+        state.meetingContexts[meetingId] = context;
+        delete state.meetingLaunchContexts[meetingId];
+        await window.listenBridge.saveMeetingBrief(meetingId, context);
+        return context;
+      }
+
+      async function loadMeetingEmailHistory(meetingId, options = {}) {
+        const { force = false } = options;
+        if (!meetingId) {
+          return null;
+        }
+
+        const existing = state.meetingEmailHistory[meetingId];
+        if (!force && existing && existing.status !== "loading") {
+          return existing;
+        }
+
+        state.meetingEmailHistory[meetingId] = {
+          status: "loading",
+          note: "Searching Gmail for relevant history...",
+          messages: [],
+        };
+        renderSelectedMeetingResearch(state.snapshot);
+
+        try {
+          const history = await window.listenBridge.getMeetingEmailHistory(meetingId);
+          state.meetingEmailHistory[meetingId] = history;
+        } catch (error) {
+          state.meetingEmailHistory[meetingId] = {
+            status: "error",
+            note: error instanceof Error ? error.message : String(error),
+            messages: [],
+          };
+        }
+
+        if (state.selectedMeetingId === meetingId) {
+          renderSelectedMeetingResearch(state.snapshot);
+        }
+
+        return state.meetingEmailHistory[meetingId];
+      }
+
+      async function loadMeetingSessionHistory(meetingId, options = {}) {
+        const { force = false } = options;
+        if (!meetingId) {
+          return null;
+        }
+
+        const existing = state.meetingSessionHistory[meetingId];
+        if (!force && existing && existing.status !== "loading") {
+          return existing;
+        }
+
+        state.meetingSessionHistory[meetingId] = {
+          status: "loading",
+          note: "Finding related prior Listen sessions...",
+          sessions: [],
+        };
+        renderSelectedMeetingResearch(state.snapshot);
+
+        try {
+          const history = await window.listenBridge.getMeetingSessionHistory(meetingId);
+          state.meetingSessionHistory[meetingId] = history;
+        } catch (error) {
+          state.meetingSessionHistory[meetingId] = {
+            status: "error",
+            note: error instanceof Error ? error.message : String(error),
+            sessions: [],
+          };
+        }
+
+        if (state.selectedMeetingId === meetingId) {
+          renderSelectedMeetingResearch(state.snapshot);
+        }
+
+        return state.meetingSessionHistory[meetingId];
+      }
+
+      async function selectMeeting(meetingId, options = {}) {
+        const { persistCurrent = true } = options;
+        if (!meetingId) {
+          state.selectedMeetingId = null;
+          state.selectedMeetingTemplateId = "";
+          state.meetingModalOpen = false;
+          state.meetingLaunchPrepOpen = false;
+          selectedMeetingTitleEl.textContent = "Meeting Brief";
+          selectedMeetingMetaEl.innerHTML = "";
+          selectedMeetingResearchEl.innerHTML = '<div class="section-empty">Select a meeting to review its research and call brief.</div>';
+          selectedMeetingHistoryEl.innerHTML = '<div class="section-empty">Select a meeting to review related email and prior sessions.</div>';
+          applyMeetingContext(defaultMeetingContext());
+          renderMeetingTemplatePicker();
+          syncMeetingModal();
+          renderMeetings(state.snapshot);
+          return;
+        }
+
+        if (persistCurrent && state.selectedMeetingId && state.selectedMeetingId !== meetingId) {
+          await persistMeetingBrief(state.selectedMeetingId);
+        }
+
+        state.selectedMeetingId = meetingId;
+        if (!state.meetingContexts[meetingId]) {
+          state.meetingContexts[meetingId] = (await window.listenBridge.getMeetingBrief(meetingId)) || defaultMeetingContext();
+        }
+
+        applyMeetingContext(state.meetingContexts[meetingId]);
+        renderMeetingTemplatePicker();
+        renderMeetings(state.snapshot);
+        renderSelectedMeetingResearch(state.snapshot);
+        syncMeetingModal();
+        void loadMeetingEmailHistory(meetingId);
+        void loadMeetingSessionHistory(meetingId);
+      }
+
+      async function ensureSelectedMeeting(snapshot) {
+        const availableMeetingIds = new Set((snapshot.upcomingMeetings || []).map((meeting) => meeting.id));
+        if (!availableMeetingIds.size) {
+          if (state.selectedMeetingId !== null) {
+            await selectMeeting(null, { persistCurrent: false });
+          }
+          return;
+        }
+
+        if (state.selectedMeetingId && availableMeetingIds.has(state.selectedMeetingId)) {
+          return;
+        }
+
+        if (state.selectedMeetingId) {
+          await selectMeeting(null, { persistCurrent: false });
+        }
+      }
+
+      function arrayBufferToBase64(buffer) {
+        let binary = "";
+        const bytes = new Uint8Array(buffer);
+        const chunkSize = 0x8000;
+        for (let index = 0; index < bytes.length; index += chunkSize) {
+          const chunk = bytes.subarray(index, index + chunkSize);
+          binary += String.fromCharCode(...chunk);
+        }
+        return btoa(binary);
+      }
+
+      const STREAM_SAMPLE_RATE = 16000;
+
+      function getRecordableAudioStream(source, stream) {
+        const audioTracks = stream.getAudioTracks();
+        if (!audioTracks.length) {
+          throw new Error(
+            source === "system"
+              ? "No system audio track was shared. In the picker, choose a screen/window/tab with audio and enable system audio sharing."
+              : "No audio track is available for capture.",
+          );
+        }
+
+        return new MediaStream(audioTracks);
+      }
+
+      function mixToMono(inputBuffer) {
+        if (inputBuffer.numberOfChannels === 1) {
+          return new Float32Array(inputBuffer.getChannelData(0));
+        }
+
+        const mono = new Float32Array(inputBuffer.length);
+        for (let channelIndex = 0; channelIndex < inputBuffer.numberOfChannels; channelIndex += 1) {
+          const channelData = inputBuffer.getChannelData(channelIndex);
+          for (let sampleIndex = 0; sampleIndex < inputBuffer.length; sampleIndex += 1) {
+            mono[sampleIndex] += channelData[sampleIndex] / inputBuffer.numberOfChannels;
+          }
+        }
+
+        return mono;
+      }
+
+      function downsampleBuffer(input, inputSampleRate, outputSampleRate) {
+        if (outputSampleRate === inputSampleRate) {
+          return input;
+        }
+
+        const sampleRateRatio = inputSampleRate / outputSampleRate;
+        const outputLength = Math.round(input.length / sampleRateRatio);
+        const output = new Float32Array(outputLength);
+
+        let outputIndex = 0;
+        let inputIndex = 0;
+        while (outputIndex < outputLength) {
+          const nextInputIndex = Math.round((outputIndex + 1) * sampleRateRatio);
+          let sum = 0;
+          let count = 0;
+          for (let index = inputIndex; index < nextInputIndex && index < input.length; index += 1) {
+            sum += input[index];
+            count += 1;
+          }
+
+          output[outputIndex] = count ? sum / count : 0;
+          outputIndex += 1;
+          inputIndex = nextInputIndex;
+        }
+
+        return output;
+      }
+
+      function encodePcm16(floatBuffer) {
+        const pcm = new Int16Array(floatBuffer.length);
+        for (let index = 0; index < floatBuffer.length; index += 1) {
+          const sample = Math.max(-1, Math.min(1, floatBuffer[index]));
+          pcm[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        }
+
+        return pcm.buffer;
+      }
+
+      function attachActivityMonitor(analyser, source, bucket) {
+        const samples = new Uint8Array(analyser.fftSize);
+        const intervalId = setInterval(async () => {
+          analyser.getByteTimeDomainData(samples);
+          let sum = 0;
+          for (const sample of samples) {
+            const normalized = (sample - 128) / 128;
+            sum += normalized * normalized;
+          }
+          const rms = Math.sqrt(sum / samples.length);
+          await window.listenBridge.reportAudioActivity(source, rms);
+        }, 2000);
+
+        bucket.intervalId = intervalId;
+      }
+
+      async function startRecorderForStream(source, stream, bucket) {
+        const recordableStream = getRecordableAudioStream(source, stream);
+        const audioContext = new AudioContext();
+        if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
+        const mediaSource = audioContext.createMediaStreamSource(recordableStream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        const silence = audioContext.createGain();
+        silence.gain.value = 0;
+
+        mediaSource.connect(analyser);
+        mediaSource.connect(processor);
+        processor.connect(silence);
+        silence.connect(audioContext.destination);
+
+        processor.onaudioprocess = (event) => {
+          if (captureState.sessionId === null) {
+            return;
+          }
+
+          const mono = mixToMono(event.inputBuffer);
+          const downsampled = downsampleBuffer(mono, audioContext.sampleRate, STREAM_SAMPLE_RATE);
+          const payloadBase64 = arrayBufferToBase64(encodePcm16(downsampled));
+          void window.listenBridge.sendAudioChunk(source, payloadBase64, STREAM_SAMPLE_RATE);
+        };
+
+        attachActivityMonitor(analyser, source, bucket);
+        bucket.stream = stream;
+        bucket.recordableStream = recordableStream;
+        bucket.audioContext = audioContext;
+        bucket.processor = processor;
+        bucket.mediaSource = mediaSource;
+        bucket.silence = silence;
+        await window.listenBridge.reportAudioStatus(source, "active", `${source} capture active.`);
+      }
+
+      async function stopSpeechFallback() {
+        speechFallbackState.shouldRestart = false;
+        speechFallbackState.sessionId = null;
+        if (speechFallbackState.activationTimeoutId) {
+          clearTimeout(speechFallbackState.activationTimeoutId);
+          speechFallbackState.activationTimeoutId = null;
+        }
+        if (!speechFallbackState.recognition) {
+          return;
+        }
+
+        const recognition = speechFallbackState.recognition;
+        speechFallbackState.recognition = null;
+        try {
+          recognition.abort();
+        } catch {
+          // Ignore shutdown errors from the browser speech engine.
+        }
+      }
+
+      async function startSpeechFallbackForSession(sessionId) {
+        const SpeechRecognitionCtor = getSpeechRecognitionCtor();
+        if (!SpeechRecognitionCtor) {
+          setCaptureStatus("Audio capture is active. Local microphone transcription is not supported in this Electron runtime.");
+          return;
+        }
+
+        await stopSpeechFallback();
+
+        const recognition = new SpeechRecognitionCtor();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+
+        speechFallbackState.recognition = recognition;
+        speechFallbackState.sessionId = sessionId;
+        speechFallbackState.shouldRestart = true;
+
+        recognition.addEventListener("start", () => {
+          setCaptureStatus("Audio capture is active. Local microphone transcription fallback is listening.");
+        });
+
+        recognition.addEventListener("result", async (event) => {
+          let finalText = "";
+          let interimText = "";
+
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const result = event.results[index];
+            const transcript = result[0]?.transcript?.trim();
+            if (!transcript) {
+              continue;
+            }
+
+            if (result.isFinal) {
+              finalText += `${transcript} `;
+            } else {
+              interimText += `${transcript} `;
+            }
+          }
+
+          const trimmedFinal = finalText.trim();
+          const trimmedInterim = interimText.trim();
+          if (trimmedFinal) {
+            await window.listenBridge.sendDebugTranscript("microphone", trimmedFinal);
+          }
+
+          if (trimmedInterim) {
+            setCaptureStatus(`Audio capture is active. Local microphone transcription: ${trimmedInterim}`);
+          }
+        });
+
+        recognition.addEventListener("error", async (event) => {
+          if (event.error === "aborted") {
+            return;
+          }
+
+          speechFallbackState.shouldRestart = event.error !== "not-allowed" && event.error !== "service-not-allowed";
+          await window.listenBridge.reportAudioStatus(
+            "microphone",
+            "error",
+            `Local microphone transcription failed: ${event.error}`,
+          );
+          setCaptureStatus(`Audio capture is active. Local microphone transcription failed: ${event.error}`);
+        });
+
+        recognition.addEventListener("end", () => {
+          if (!speechFallbackState.shouldRestart || speechFallbackState.sessionId !== sessionId) {
+            return;
+          }
+
+          try {
+            recognition.start();
+          } catch {
+            // Ignore repeated start races from rapid browser end/start events.
+          }
+        });
+
+        recognition.start();
+      }
+
+      function scheduleSpeechFallbackActivation(sessionId) {
+        if (!speechFallbackState.supported) {
+          return;
+        }
+
+        if (speechFallbackState.activationTimeoutId) {
+          clearTimeout(speechFallbackState.activationTimeoutId);
+        }
+
+        speechFallbackState.activationTimeoutId = setTimeout(() => {
+          speechFallbackState.activationTimeoutId = null;
+
+          if (captureState.sessionId !== sessionId) {
+            return;
+          }
+
+          if ((state.snapshot?.transcript?.length ?? 0) > 0) {
+            return;
+          }
+
+          void startSpeechFallbackForSession(sessionId);
+        }, 6000);
+      }
+
+      async function stopCapture() {
+        const buckets = [captureState.system, captureState.microphone].filter(Boolean);
+        const hadActiveCapture = Boolean(captureState.sessionId || buckets.length);
+
+        if (!hadActiveCapture) {
+          setCaptureStatus("Idle.");
+          return;
+        }
+
+        for (const bucket of buckets) {
+          if (bucket.stream) {
+            bucket.stream.getTracks().forEach((track) => track.stop());
+          }
+          if (bucket.recordableStream) {
+            bucket.recordableStream.getTracks().forEach((track) => track.stop());
+          }
+          if (bucket.intervalId) {
+            clearInterval(bucket.intervalId);
+          }
+          if (bucket.audioContext) {
+            await bucket.audioContext.close();
+          }
+        }
+        captureState.system = null;
+        captureState.microphone = null;
+        captureState.sessionId = null;
+        await stopSpeechFallback();
+        setCaptureStatus("Idle.");
+        await window.listenBridge.reportAudioStatus("microphone", "idle", "Microphone capture idle.");
+        await window.listenBridge.reportAudioStatus("system", "idle", "System audio capture idle.");
+      }
+
+      async function ensureCaptureForSnapshot(snapshot) {
+        if (!snapshot.activeSession) {
+          await stopCapture();
+          return;
+        }
+
+        if (captureState.sessionId === snapshot.activeSession.id) {
+          return;
+        }
+
+        await stopCapture();
+        captureState.sessionId = snapshot.activeSession.id;
+        captureState.system = {};
+        captureState.microphone = {};
+        setCaptureStatus("Starting microphone and system-audio capture...");
+        await window.listenBridge.reportAudioStatus("microphone", "starting", "Requesting microphone access.");
+        await window.listenBridge.reportAudioStatus("system", "starting", "Requesting system audio access.");
+
+        try {
+          const micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          await startRecorderForStream("microphone", micStream, captureState.microphone);
+          if (!state.runtimeCapabilities.cloudTranscriptionConfigured) {
+            await startSpeechFallbackForSession(snapshot.activeSession.id);
+          } else {
+            scheduleSpeechFallbackActivation(snapshot.activeSession.id);
+          }
+        } catch (error) {
+          await window.listenBridge.reportAudioStatus("microphone", "error", `Microphone capture failed: ${error instanceof Error ? error.message : error}`);
+          setCaptureStatus(`Microphone capture failed: ${error instanceof Error ? error.message : error}`);
+        }
+
+        try {
+          const systemStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+          await startRecorderForStream("system", systemStream, captureState.system);
+        } catch (error) {
+          await window.listenBridge.reportAudioStatus("system", "error", `System audio capture failed: ${error instanceof Error ? error.message : error}`);
+          const previous = captureState.status === "Idle." ? "" : `${captureState.status} `;
+          setCaptureStatus(`${previous}System audio capture failed: ${error instanceof Error ? error.message : error}`.trim());
+        }
+
+        if ((captureState.system && captureState.system.recorder) || (captureState.microphone && captureState.microphone.recorder)) {
+          setCaptureStatus(
+            state.runtimeCapabilities.cloudTranscriptionConfigured
+              ? "Audio capture is active."
+              : "Audio capture is active. Using local microphone transcription fallback.",
+          );
+        }
+      }
+
+      function renderConnections(snapshot) {
+        connectionsEl.innerHTML = snapshot.calendarConnections
+          .map((connection) => {
+            if (connection.provider === "mock") {
+              return `
+                <div class="connection-card">
+                  <div class="row-between">
+                    <strong>${connection.provider}</strong>
+                    <span class="badge neutral">demo</span>
+                  </div>
+                  <p class="body-copy">${connection.accountLabel}</p>
+                </div>
+              `;
+            }
+
+            const action = connection.connected ? "disconnect" : "connect";
+            const label = connection.connected ? "Disconnect" : "Connect";
+            return `
+              <div class="connection-card">
+                <div class="row-between">
+                  <strong>${connection.provider}</strong>
+                  <span class="badge ${connection.connected ? "success" : "neutral"}">${connection.connected ? "connected" : "available"}</span>
+                </div>
+                <p class="body-copy">${connection.accountLabel}</p>
+                <div class="meeting-actions">
+                  <button data-calendar-action="${action}" data-provider="${connection.provider}" class="${connection.connected ? "secondary" : ""}">${label}</button>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-calendar-action]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const provider = button.getAttribute("data-provider");
+            const action = button.getAttribute("data-calendar-action");
+            const snapshot = await runUiAction(
+              `${action === "connect" ? "Connecting" : "Disconnecting"} ${provider} calendar...`,
+              () => action === "connect"
+                ? window.listenBridge.connectCalendar(provider)
+                : window.listenBridge.disconnectCalendar(provider),
+            );
+            await render(snapshot);
+          });
+        });
+      }
+
+      function renderMeetings(snapshot) {
+        if (!snapshot.upcomingMeetings.length) {
+          meetingsEl.innerHTML = '<div class="section-empty">No meetings yet. Finish Setup or refresh your calendar connections to load upcoming calls.</div>';
+          return;
+        }
+
+        const currentUserEmails = getCurrentUserEmails(snapshot);
+        const meetingsToRender = snapshot.pendingPopupMeeting
+          ? snapshot.upcomingMeetings.filter((meeting) => meeting.id !== snapshot.pendingPopupMeeting.id)
+          : snapshot.upcomingMeetings;
+
+        if (!meetingsToRender.length) {
+          meetingsEl.innerHTML = '<div class="section-empty">The next meeting is already pinned above. Open it there or create another meeting to keep testing.</div>';
+          return;
+        }
+
+        meetingsEl.innerHTML = meetingsToRender
+          .map((meeting) => {
+            const visibleAttendees = (meeting.attendees || []).filter((attendee) => {
+              const attendeeEmail = normalizeEmail(attendee.email);
+              if (attendeeEmail && currentUserEmails.has(attendeeEmail)) {
+                return false;
+              }
+
+              return attendeeEmail !== normalizeEmail(meeting.organizerEmail);
+            });
+            const attendeeNames = visibleAttendees
+              .map((attendee) => attendee.fullName)
+              .filter(Boolean)
+              .slice(0, 2)
+              .join(", ");
+            const attendeeSummary = visibleAttendees.length
+              ? `${visibleAttendees.length} guest${visibleAttendees.length === 1 ? "" : "s"}`
+              : "No guests listed";
+            const researchStatus = meeting.research?.status === "completed"
+              ? "Research ready"
+              : meeting.research?.status
+                ? `Research ${meeting.research.status}`
+                : "Research pending";
+            const attendeeDetail = attendeeNames || attendeeSummary;
+            const showInlinePrep = state.meetingLaunchPrepOpen && state.selectedMeetingId === meeting.id;
+            return `
+              <div>
+                <div class="meeting-card ${meeting.id === state.selectedMeetingId && (state.meetingModalOpen || state.meetingLaunchPrepOpen) ? "selected" : ""}" data-meeting-id="${meeting.id}">
+                  <div class="meeting-card-main">
+                    <div class="meeting-card-topline">
+                      <h3 class="meeting-card-title">${escapeHtml(meeting.title)}</h3>
+                      <div class="meeting-card-time">${escapeHtml(formatMeetingTimeRange(meeting.startsAt, meeting.endsAt))}</div>
+                    </div>
+                    <div class="meeting-card-subline">
+                      <div class="meeting-card-pill"><span>${escapeHtml(attendeeSummary)}</span></div>
+                      <div class="meeting-card-pill"><span>${escapeHtml(meeting.provider.replaceAll("_", " "))}</span></div>
+                      <div class="meeting-card-pill ${meeting.research?.status === "completed" ? "success" : "warning"}"><span>${escapeHtml(researchStatus)}</span></div>
+                      ${attendeeDetail && attendeeDetail !== attendeeSummary ? `<div class="meeting-card-pill"><span>${escapeHtml(attendeeDetail)}</span></div>` : ""}
+                    </div>
+                  </div>
+                  <div class="meeting-card-actions">
+                    <button class="secondary meeting-details-button" data-open-details="${meeting.id}">Details</button>
+                      <button class="meeting-launch-button" data-launch="${meeting.id}">Prep Before Launch</button>
+                  </div>
+                </div>
+                ${showInlinePrep ? buildInlineMeetingPrepMarkup(meeting) : ""}
+              </div>
+            `;
+          })
+          .join("");
+
+          document.querySelectorAll("[data-meeting-id]").forEach((card) => {
+            card.addEventListener("click", async (event) => {
+              if (event.target.closest("[data-launch]") || event.target.closest("[data-open-details]")) {
+                return;
+              }
+
+              await openMeetingModal(card.getAttribute("data-meeting-id"));
+            });
+          });
+
+        document.querySelectorAll("[data-open-details]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await openMeetingModal(button.getAttribute("data-open-details"));
+          });
+        });
+
+        document.querySelectorAll("[data-launch]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const meetingId = button.getAttribute("data-launch");
+            if (!meetingId) {
+              return;
+            }
+
+            await selectMeeting(meetingId);
+            state.meetingModalOpen = false;
+            state.meetingLaunchPrepOpen = true;
+            syncMeetingModal();
+            renderMeetings(state.snapshot);
+          });
+        });
+
+        renderInlineMeetingPrep(snapshot);
+      }
+
+      function renderInlineMeetingPrep(snapshot) {
+        const meeting = snapshot?.upcomingMeetings?.find((item) => item.id === state.selectedMeetingId);
+        if (!state.meetingLaunchPrepOpen || !meeting) {
+          return;
+        }
+
+        const context = state.meetingContexts[meeting.id] || defaultMeetingContext();
+        const callFunctionEl = document.getElementById("inline-brief-call-function");
+        const callTypeEl = document.getElementById("inline-brief-call-type");
+        const callGoalEl = document.getElementById("inline-brief-call-goal");
+        const userRoleEl = document.getElementById("inline-brief-user-role");
+        const guestRoleEl = document.getElementById("inline-brief-guest-role");
+        const desiredOutcomeEl = document.getElementById("inline-brief-desired-outcome");
+        const notesEl = document.getElementById("inline-brief-notes");
+        const templateSelectEl = document.getElementById("inline-brief-template-select");
+
+        const syncInlineCallTypeOptions = () => {
+          const options = callTypeOptions[callFunctionEl.value] || [];
+          const current = callTypeEl.value;
+          callTypeEl.innerHTML = options.map((callType) => `<option value="${callType}">${callType}</option>`).join("");
+          callTypeEl.value = options.includes(current) ? current : (context.callType && options.includes(context.callType) ? context.callType : options[0] || "");
+        };
+
+        callFunctionEl.innerHTML = Object.keys(callTypeOptions)
+          .map((callFunction) => `<option value="${callFunction}">${callFunction}</option>`)
+          .join("");
+        callFunctionEl.value = context.callFunction || "sales";
+        syncInlineCallTypeOptions();
+
+        const updateDraft = () => {
+          state.meetingContexts[meeting.id] = {
+            callFunction: callFunctionEl.value,
+            callType: callTypeEl.value,
+            callGoal: callGoalEl.value.trim(),
+            userRole: userRoleEl.value.trim(),
+            guestRole: guestRoleEl.value.trim(),
+            desiredOutcome: desiredOutcomeEl.value.trim(),
+            notes: notesEl.value.trim(),
+          };
+          delete state.meetingLaunchContexts[meeting.id];
+        };
+
+        [callGoalEl, userRoleEl, guestRoleEl, desiredOutcomeEl, notesEl].forEach((input) => {
+          input.addEventListener("input", updateDraft);
+          input.addEventListener("change", updateDraft);
+        });
+        callFunctionEl.addEventListener("change", () => {
+          syncInlineCallTypeOptions();
+          updateDraft();
+        });
+        callTypeEl.addEventListener("change", updateDraft);
+        templateSelectEl.addEventListener("change", () => {
+          state.selectedMeetingTemplateId = templateSelectEl.value;
+        });
+
+        document.getElementById("inline-apply-meeting-template").addEventListener("click", async () => {
+          const template = state.meetingTemplates.find((item) => item.id === state.selectedMeetingTemplateId);
+          if (!template) {
+            setStatusBanner("error", "Choose a saved template first.");
+            return;
+          }
+
+          state.meetingContexts[meeting.id] = { ...template.context };
+          delete state.meetingLaunchContexts[meeting.id];
+          renderInlineMeetingPrep(state.snapshot);
+        });
+        document.getElementById("inline-open-meeting-details").addEventListener("click", async () => {
+          await openMeetingModal(meeting.id);
+          setPrepTab("brief");
+        });
+        document.getElementById("inline-save-meeting-brief").addEventListener("click", async () => {
+          updateDraft();
+          await runUiAction("Saving meeting brief...", () => window.listenBridge.saveMeetingBrief(meeting.id, state.meetingContexts[meeting.id]));
+        });
+        document.getElementById("inline-launch-meeting").addEventListener("click", async () => {
+          updateDraft();
+          await runUiAction("Saving meeting brief...", () => window.listenBridge.saveMeetingBrief(meeting.id, state.meetingContexts[meeting.id]));
+          await launchMeetingWithPreparedContext(meeting.id);
+        });
+      }
+
+      function renderSelectedMeetingResearch(snapshot) {
+          const meeting = snapshot.upcomingMeetings.find((item) => item.id === state.selectedMeetingId);
+          if (!meeting) {
+            selectedMeetingTitleEl.textContent = "Prep Workspace";
+            selectedMeetingMetaEl.innerHTML = "";
+            selectedMeetingResearchEl.innerHTML = '<div class="section-empty">Select a meeting to review its research and call brief.</div>';
+            selectedMeetingHistoryEl.innerHTML = '<div class="section-empty">Select a meeting to review related email and prior sessions.</div>';
+            return;
+          }
+
+          selectedMeetingTitleEl.textContent = meeting.title;
+          selectedMeetingMetaEl.innerHTML = `
+            <span class="page-chip">${escapeHtml(formatMeetingTimeRange(meeting.startsAt, meeting.endsAt))}</span>
+            <span class="page-chip">${escapeHtml(meeting.provider.replaceAll("_", " "))}</span>
+            ${meeting.attendees?.length ? `<span class="page-chip">${meeting.attendees.length} attendee${meeting.attendees.length === 1 ? "" : "s"}</span>` : ""}
+          `;
+          const emailHistory = state.meetingEmailHistory[meeting.id];
+          const sessionHistory = state.meetingSessionHistory[meeting.id];
+          const personSummary = isUsefulResearchText(meeting.research?.personSummary) ? meeting.research.personSummary.trim() : "";
+          const recentSignals = (meeting.research?.recentSignals || []).filter((signal) => isUsefulResearchText(signal)).slice(0, 5);
+          const attendeeMarkup = meeting.attendees?.length
+            ? `<div class="attendee-list">${meeting.attendees.slice(0, 6).map((attendee) => `
+                <div class="attendee-item">
+                  <strong>${attendee.fullName}</strong>
+                  <div class="meta-line">${(!looksSyntheticOrganizationName(attendee.organizationName) && attendee.organizationName) || attendee.title || attendee.email || "attendee"}</div>
+                </div>
+              `).join("")}</div>`
+            : '<div class="section-empty">No attendee details available.</div>';
+          const sourceLinksMarkup = meeting.research?.sourceLinks?.length
+            ? `<div class="link-list">${meeting.research.sourceLinks.slice(0, 5).map((link) => `<a href="${link}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join("")}</div>`
+            : '<div class="section-empty">No research links available yet.</div>';
+
+          selectedMeetingResearchEl.innerHTML = `
+            <div class="research-stack">
+              <div class="stats-grid">
+              <div class="stat-tile">
+                <div class="stat-label">Starts</div>
+                <div class="stat-value">${formatDate(meeting.startsAt)}</div>
+              </div>
+              <div class="stat-tile">
+                <div class="stat-label">Research Status</div>
+                <div class="stat-value">${meeting.research?.status || "not available"}</div>
+              </div>
+            </div>
+            <div class="research-grid">
+              <div class="research-section">
+              <h3>Prospect</h3>
+              <p>${personSummary || "No useful prospect summary is available yet."}</p>
+              </div>
+            </div>
+            <div class="research-section full-width">
+              <h3>Recent Signals</h3>
+              ${recentSignals.length ? `<div class="evidence-list">${recentSignals.map((signal) => `<div class="transcript-item">${escapeHtml(signal)}</div>`).join("")}</div>` : '<div class="section-empty">Research is not ready yet beyond the basic meeting metadata.</div>'}
+            </div>
+            <div class="research-grid">
+              <div class="research-section">
+              <h3>Attendees</h3>
+              ${attendeeMarkup}
+              </div>
+              <div class="research-section">
+              <h3>Source Links</h3>
+              ${sourceLinksMarkup}
+              </div>
+            </div>
+          </div>
+          `;
+
+          selectedMeetingHistoryEl.innerHTML = `
+            <div class="research-stack">
+              <div class="research-section full-width">
+                <div class="inline-actions">
+                  <h3>Email History</h3>
+                  <button id="refresh-meeting-emails" class="secondary">Refresh</button>
+                </div>
+                ${!emailHistory || emailHistory.status === "loading"
+                  ? '<div class="section-empty">Searching Gmail for relevant history...</div>'
+                  : emailHistory.status === "not_connected" || emailHistory.status === "needs_reconnect"
+                    ? `<div class="section-empty">${escapeHtml(emailHistory.note || "Connect Google in Setup to enable Gmail history for this meeting.")}</div>`
+                  : emailHistory.status === "error"
+                    ? `<div class="section-empty">${escapeHtml(emailHistory.note || "Gmail history could not be loaded.")}</div>`
+                  : emailHistory.messages?.length
+                    ? `<p class="muted">${escapeHtml(emailHistory.note || "Recent Gmail history for this meeting.")}</p><div class="email-list">${emailHistory.messages.map((message) => `
+                        <div class="email-item">
+                          <strong>${escapeHtml(message.subject || "No subject")}</strong>
+                          <div class="meta-line">${escapeHtml(message.from || "Unknown sender")}${message.date ? ` · ${escapeHtml(message.date)}` : ""}</div>
+                          <p>${escapeHtml(message.snippet || "")}</p>
+                        </div>
+                      `).join("")}</div>`
+                    : `<div class="section-empty">${escapeHtml(emailHistory.note || "No related email history found.")}</div>`}
+              </div>
+              <div class="research-section full-width">
+                <div class="inline-actions">
+                  <h3>Previous Listen Sessions</h3>
+                  <button id="refresh-meeting-sessions" class="secondary">Refresh</button>
+                </div>
+                ${!sessionHistory || sessionHistory.status === "loading"
+                  ? '<div class="section-empty">Finding related prior Listen sessions...</div>'
+                  : sessionHistory.status === "error"
+                    ? `<div class="section-empty">${escapeHtml(sessionHistory.note || "Prior session history could not be loaded.")}</div>`
+                  : sessionHistory.sessions?.length
+                    ? `<p class="muted">${escapeHtml(sessionHistory.note || "Related prior Listen sessions.")}</p><div class="session-history-list">${sessionHistory.sessions.map((session) => `
+                        <div class="session-history-item">
+                          <strong>${escapeHtml(session.meetingTitle)}</strong>
+                          <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
+                          <p>${escapeHtml(session.headline)}</p>
+                          ${session.transcriptNote ? `<p>${escapeHtml(session.transcriptNote)}</p>` : ""}
+                          <div class="meta-line">${escapeHtml(session.matchReason)}</div>
+                        </div>
+                      `).join("")}</div>`
+                    : `<div class="section-empty">${escapeHtml(sessionHistory?.note || "No related Listen sessions found.")}</div>`}
+              </div>
+            </div>
+          `;
+
+        const refreshEmailsButton = document.getElementById("refresh-meeting-emails");
+        if (refreshEmailsButton) {
+          refreshEmailsButton.addEventListener("click", async () => {
+            await loadMeetingEmailHistory(meeting.id, { force: true });
+          });
+        }
+
+        const refreshSessionsButton = document.getElementById("refresh-meeting-sessions");
+        if (refreshSessionsButton) {
+          refreshSessionsButton.addEventListener("click", async () => {
+            await loadMeetingSessionHistory(meeting.id, { force: true });
+          });
+        }
+        }
+
+      function renderPopup(snapshot) {
+        if (!snapshot.pendingPopupMeeting) {
+          popupEl.innerHTML = "";
+          return;
+        }
+
+        const meeting = snapshot.pendingPopupMeeting;
+        popupEl.innerHTML = `
+          <div class="card popup" data-popup-meeting-id="${meeting.id}">
+            <div class="badge">Upcoming meeting</div>
+            <h2>${meeting.title}</h2>
+            <p class="body-copy">${formatDate(meeting.startsAt)}</p>
+            ${meeting.research ? `
+              <div class="research-note">
+                <div class="badge success">research ${meeting.research.status}</div>
+                <p><strong>Prospect:</strong> ${meeting.research.personSummary ?? "Pending research snapshot."}</p>
+                <p><strong>Org:</strong> ${meeting.research.organizationSummary ?? "Organization summary pending."}</p>
+                <p><strong>Signals:</strong> ${(meeting.research.recentSignals || []).slice(0, 2).join(" ") || "No recent signals yet."}</p>
+              </div>
+            ` : '<p class="muted">No pre-meeting research available yet.</p>'}
+            <div class="meeting-actions">
+              <button id="popup-details" class="secondary">Details</button>
+              <button id="popup-launch">Launch + Record</button>
+              <button id="popup-dismiss" class="secondary">Dismiss</button>
+            </div>
+          </div>
+        `;
+
+        document.getElementById("popup-details").addEventListener("click", async () => {
+          await openMeetingModal(meeting.id);
+        });
+
+        document.getElementById("popup-launch").addEventListener("click", async () => {
+          await openMeetingModal(meeting.id);
+          setPrepTab("brief");
+        });
+        document.getElementById("popup-dismiss").addEventListener("click", async () => {
+          const snapshot = await runUiAction("Dismissing popup...", () => window.listenBridge.dismissPopup());
+          await render(snapshot);
+        });
+      }
+
+      function renderActiveSession(snapshot) {
+        if (!snapshot.activeSession) {
+          if (activeCallShellEl) {
+            activeCallShellEl.hidden = true;
+            activeCallShellEl.classList.remove("compact-live");
+          }
+          if (endSessionButtonEl) {
+            endSessionButtonEl.hidden = true;
+          }
+          activeSessionEl.innerHTML = "";
+          return;
+        }
+
+        if (activeCallShellEl) {
+          activeCallShellEl.hidden = false;
+          activeCallShellEl.classList.add("compact-live");
+        }
+
+        if (endSessionButtonEl) {
+          endSessionButtonEl.hidden = false;
+        }
+
+        activeSessionEl.innerHTML = `
+          <div class="stats-grid">
+            <div class="stat-tile">
+              <div class="stat-label">Status</div>
+              <div class="stat-value">${snapshot.activeSession.status}</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Started</div>
+              <div class="stat-value">${formatDate(snapshot.activeSession.startedAt)}</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Expected End</div>
+              <div class="stat-value">${formatDate(snapshot.activeSession.expectedEndAt)}</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Stop Reason</div>
+              <div class="stat-value">${snapshot.activeSession.stopReason ?? "pending"}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderCaptureHealth(snapshot) {
+        captureHealthEl.innerHTML = ["microphone", "system"]
+          .map((source) => {
+            const health = snapshot.captureHealth[source];
+            return `
+              <div class="health-card">
+                <div class="row-between">
+                  <strong>${source}</strong>
+                  <span class="badge ${health.status === "active" ? "success" : "neutral"}">${health.status}</span>
+                </div>
+                <p class="body-copy">${health.detail}</p>
+                <div class="meta-line">Chunks: ${health.chunkCount}</div>
+                <div class="meta-line">Last activity: ${health.lastActivityAt ? formatDate(health.lastActivityAt) : "none"}</div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      function buildTranscriptMarkup(transcript) {
+        const groupedSegments = (transcript || []).reduce((groups, segment) => {
+          const speaker = segment.speakerLabel || segment.source;
+          const previousGroup = groups[groups.length - 1];
+
+          if (previousGroup && previousGroup.speaker === speaker) {
+            previousGroup.lines.push(segment.text);
+            return groups;
+          }
+
+          groups.push({ speaker, lines: [segment.text] });
+          return groups;
+        }, []);
+
+        return (transcript || []).length
+          ? `<div class="transcript-list">${groupedSegments
+              .map((group) => {
+                return `
+                  <div class="transcript-item">
+                    <div class="meta-line"><strong>${group.speaker}</strong></div>
+                    <p>${group.lines.join(" ")}</p>
+                  </div>
+                `;
+              })
+              .join("")}</div>`
+          : '<div class="section-empty">No transcript events yet.</div>';
+      }
+
+      function renderTranscript(snapshot) {
+        transcriptEl.innerHTML = buildTranscriptMarkup(snapshot.transcript);
+      }
+
+      function renderCoaching(snapshot) {
+        const preferences = state.coachingPreferences?.settings || {
+          style: "supportive",
+          directness: "balanced",
+          frequency: "balanced",
+        };
+        const activeMode = `
+          <div class="coach-mode-card">
+            <div class="badge success">active mode</div>
+            <p><strong>Style:</strong> ${preferences.style}</p>
+            <p><strong>Directness:</strong> ${preferences.directness}</p>
+            <p><strong>Frequency:</strong> ${preferences.frequency}</p>
+          </div>
+        `;
+
+        coachingEl.innerHTML = activeMode + (snapshot.coaching.length
+          ? `<div class="coaching-list">${snapshot.coaching
+              .map((prompt) => `
+                <div class="coach-item">
+                  <div class="badge ${prompt.severity === "warning" ? "neutral" : "success"}">${prompt.severity}</div>
+                  <h3>${prompt.title}</h3>
+                  ${prompt.speakerLabel ? `<p><strong>Speaker:</strong> ${prompt.speakerLabel}</p>` : ""}
+                  <p>${prompt.message}</p>
+                </div>
+              `)
+              .join("")}</div>`
+          : '<div class="section-empty">No coaching prompts yet.</div>');
+      }
+
+      function renderReviewItemList(items, emptyMessage) {
+        if (!items?.length) {
+          return `<div class="section-empty">${escapeHtml(emptyMessage)}</div>`;
+        }
+
+        return `<div class="review-bullet-list">${items.map((item) => `<div class="review-bullet-item">${escapeHtml(item)}</div>`).join("")}</div>`;
+      }
+
+      function renderReviewWorkspace(snapshot) {
+        if (!reviewSessionListEl || !reviewSessionDetailEl) {
+          return;
+        }
+
+        const sessionsState = state.reviewSessions;
+        const filteredSessions = getFilteredReviewSessions();
+        reviewSessionListEl.innerHTML = sessionsState.status === "loading" && !sessionsState.items.length
+          ? '<div class="section-empty">Loading saved Listen sessions...</div>'
+          : sessionsState.status === "error"
+            ? `<div class="section-empty">${escapeHtml(sessionsState.note || "Saved session history could not be loaded.")}</div>`
+            : filteredSessions.length
+              ? filteredSessions.map((session) => `
+                  <button class="review-session-button ${session.sessionId === state.selectedReviewSessionId ? "active" : ""}" data-review-session-id="${session.sessionId}">
+                    <div class="row-between">
+                      <strong>${escapeHtml(session.meetingTitle)}</strong>
+                      <span class="badge ${session.sessionId === snapshot?.lastSummary?.sessionId ? "success" : "neutral"}">${session.sessionId === snapshot?.lastSummary?.sessionId ? "latest" : "saved"}</span>
+                    </div>
+                    <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
+                    <div class="muted">${escapeHtml(session.summary?.headline || "No summary headline")}</div>
+                  </button>
+                `).join("")
+              : sessionsState.items.length
+                ? '<div class="section-empty">No saved calls match the current filters.</div>'
+              : `<div class="section-empty">${escapeHtml(sessionsState.note || "No saved calls yet. Finish one call and it will appear here.")}</div>`;
+
+        document.querySelectorAll("[data-review-session-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await selectReviewSession(button.getAttribute("data-review-session-id"), { preserveQuestion: false });
+          });
+        });
+
+        const refreshReviewSessionsButton = document.getElementById("refresh-review-sessions");
+        refreshReviewSessionsButton?.addEventListener("click", async () => {
+          await loadReviewSessions({ force: true });
+        });
+
+        const selectedSession = getSelectedReviewSession(filteredSessions);
+        if (!selectedSession) {
+          reviewSessionDetailEl.innerHTML = `
+            <div>
+              <div class="eyebrow">Review</div>
+              <h2 class="review-empty-title">No call selected</h2>
+              <p class="muted">Choose a saved call from the left to inspect the summary, coaching history, and transcript.</p>
+            </div>
+          `;
+          return;
+        }
+
+        const detailState = state.reviewSessionDetails[selectedSession.sessionId];
+        const detail = detailState?.detail;
+        const summary = detail?.summary || selectedSession.summary;
+        const context = detail?.context;
+        const coachingMarkup = detail?.coaching?.length
+          ? `<div class="coaching-list">${detail.coaching.map((prompt) => `
+              <div class="coach-item">
+                <div class="badge ${prompt.severity === "warning" ? "neutral" : "success"}">${prompt.severity}</div>
+                <h3>${escapeHtml(prompt.title)}</h3>
+                ${prompt.speakerLabel ? `<p><strong>Speaker:</strong> ${escapeHtml(prompt.speakerLabel)}</p>` : ""}
+                <p>${escapeHtml(prompt.message)}</p>
+              </div>
+            `).join("")}</div>`
+          : renderReviewItemList(summary?.coachingRecap || [], "No coaching highlights were saved for this call.");
+
+        reviewSessionDetailEl.innerHTML = `
+          <div class="review-session-header">
+            <div>
+              <div class="eyebrow">Selected Call</div>
+              <h2>${escapeHtml(selectedSession.meetingTitle)}</h2>
+              <p class="muted">${escapeHtml(summary?.headline || "Saved Listen session")}</p>
+            </div>
+            <div class="page-chip-row">
+              <span class="page-chip">Completed ${escapeHtml(formatDate(selectedSession.completedAt))}</span>
+              <span class="page-chip">${escapeHtml(selectedSession.meetingProvider.replaceAll("_", " "))}</span>
+              <span class="page-chip">${escapeHtml(selectedSession.stopReason.replaceAll("_", " "))}</span>
+            </div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-tile">
+              <div class="stat-label">Headline</div>
+              <div class="stat-value">${escapeHtml(summary?.headline || "No summary headline")}</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Meeting Goal</div>
+              <div class="stat-value">${escapeHtml(context?.callGoal || context?.desiredOutcome || "No saved goal")}</div>
+            </div>
+          </div>
+          <div class="review-summary-grid">
+            <div class="review-summary-section">
+              <h3>Decisions</h3>
+              ${renderReviewItemList(summary?.decisions || [], "No decisions were captured.")}
+            </div>
+            <div class="review-summary-section">
+              <h3>Action Items</h3>
+              ${renderReviewItemList(summary?.actionItems || [], "No action items were captured.")}
+            </div>
+            <div class="review-summary-section">
+              <h3>Open Questions</h3>
+              ${renderReviewItemList(summary?.openQuestions || [], "No open questions were captured.")}
+            </div>
+            <div class="review-summary-section">
+              <h3>Meeting Context</h3>
+              ${context
+                ? `<div class="review-bullet-list">
+                    <div class="review-bullet-item"><strong>Function:</strong> ${escapeHtml(context.callFunction || "n/a")}</div>
+                    <div class="review-bullet-item"><strong>Your Role:</strong> ${escapeHtml(context.userRole || "n/a")}</div>
+                    <div class="review-bullet-item"><strong>Guest Role:</strong> ${escapeHtml(context.guestRole || "n/a")}</div>
+                    <div class="review-bullet-item"><strong>Desired Outcome:</strong> ${escapeHtml(context.desiredOutcome || "n/a")}</div>
+                  </div>`
+                : '<div class="section-empty">No saved meeting brief context for this call.</div>'}
+            </div>
+          </div>
+          <div class="review-detail-grid">
+            <div class="review-panel research-section">
+              <div class="card-header">
+                <div>
+                  <h3>Coaching Timeline</h3>
+                  <p class="muted">What the coach surfaced during the call.</p>
+                </div>
+              </div>
+              ${detailState?.status === "loading" && !detail
+                ? '<div class="section-empty">Loading coaching detail...</div>'
+                : detailState?.status === "error"
+                  ? `<div class="section-empty">${escapeHtml(detailState.note || "Coaching detail could not be loaded.")}</div>`
+                  : `<div class="section-scroller">${coachingMarkup}</div>`}
+            </div>
+            <div class="review-panel research-section">
+              <div class="card-header">
+                <div>
+                  <h3>Transcript</h3>
+                  <p class="muted">Review exact phrasing and moments from the saved call.</p>
+                </div>
+              </div>
+              ${detailState?.status === "loading" && !detail
+                ? '<div class="section-empty">Loading transcript detail...</div>'
+                : detailState?.status === "error"
+                  ? `<div class="section-empty">${escapeHtml(detailState.note || "Transcript detail could not be loaded.")}</div>`
+                  : `<div class="section-scroller">${buildTranscriptMarkup(detail?.transcript || [])}</div>`}
+            </div>
+          </div>
+        `;
+      }
+
+      function renderSessionQaPanel(targetEl, snapshot, options = {}) {
+        const { mode = "review" } = options;
+        const panelKey = mode === "active" ? "active" : "review";
+        const qaState = state.sessionQa[panelKey];
+        const selectedReviewSession = getSelectedReviewSession();
+        const hasContext = panelKey === "active" ? Boolean(snapshot.activeSession) : Boolean(selectedReviewSession);
+
+        if (!hasContext) {
+          targetEl.innerHTML = panelKey === "active"
+            ? ""
+            : `
+              <p class="muted">Choose a saved call to ask about its transcript, coaching, and meeting context.</p>
+              <div id="session-qa-thread-${panelKey}" class="qa-thread-shell">
+                <div class="qa-message assistant">
+                  <div class="meta-line">Listen</div>
+                  <div class="qa-bubble"><p class="muted">The Q&A thread will appear here once a call is selected.</p></div>
+                </div>
+              </div>
+            `;
+          return;
+        }
+
+        const guidance = panelKey === "active"
+          ? ""
+          : selectedReviewSession
+            ? `Ask about ${selectedReviewSession.meetingTitle} using its stored transcript, coaching, and meeting context.`
+            : "Select a saved call first so there is session context to query.";
+
+        const historyMarkup = qaState.history.length
+          ? qaState.history
+            .map((entry) => {
+              const roleLabel = entry.role === "user"
+                ? "You"
+                : entry.role === "system"
+                  ? "Status"
+                  : "Listen";
+
+              return `
+                <div class="qa-message ${entry.role}">
+                  <div class="meta-line">${roleLabel}</div>
+                  <div class="qa-bubble">
+                    <p>${escapeHtml(entry.text)}</p>
+                    ${entry.evidence?.length ? `<div class="evidence-list">${entry.evidence.map((item) => `<div class="transcript-item">${escapeHtml(item)}</div>`).join("")}</div>` : ""}
+                  </div>
+                </div>
+              `;
+            })
+            .join("")
+          : panelKey === "active"
+            ? ""
+            : '<div class="qa-message assistant"><div class="meta-line">Listen</div><div class="qa-bubble"><p class="muted">Ask a question to start the thread.</p></div></div>';
+
+        const pendingReplyMarkup = qaState.pending
+          ? `
+            <div class="qa-message assistant">
+              <div class="meta-line">Listen</div>
+              <div class="qa-bubble">
+                <p class="muted">Thinking...</p>
+              </div>
+            </div>
+          `
+          : "";
+
+        targetEl.innerHTML = `
+          ${guidance ? `<p class="muted">${escapeHtml(guidance)}</p>` : ""}
+          <div id="session-qa-thread-${panelKey}" class="qa-thread-shell ${panelKey === "active" ? "compact" : ""}">
+            <div class="qa-thread">
+              ${historyMarkup}
+              ${pendingReplyMarkup}
+            </div>
+          </div>
+          <div class="composer">
+            <textarea id="session-question-${panelKey}" rows="${panelKey === "active" ? "2" : "3"}" placeholder="${panelKey === "active" ? "Ask about the call" : "What objection came up? What mattered most to the guest? What follow-up should I send?"}"></textarea>
+          </div>
+          <div class="meeting-actions">
+            <button id="ask-session-question-${panelKey}" class="secondary" ${!hasContext || qaState.pending ? "disabled" : ""}>${qaState.pending ? "Asking..." : "Ask"}</button>
+          </div>
+        `;
+
+        const askButton = document.getElementById(`ask-session-question-${panelKey}`);
+        const questionEl = document.getElementById(`session-question-${panelKey}`);
+        const threadEl = document.getElementById(`session-qa-thread-${panelKey}`);
+        if (threadEl) {
+          threadEl.scrollTop = threadEl.scrollHeight;
+        }
+        if (questionEl) {
+          questionEl.value = qaState.pendingQuestion || "";
+        }
+        askButton?.addEventListener("click", async () => {
+          const question = questionEl.value.trim();
+          if (!question) {
+            setStatusBanner("error", "Enter a question first.");
+            return;
+          }
+
+          qaState.pending = true;
+          qaState.pendingQuestion = "";
+          qaState.history.push({
+            role: "user",
+            text: question,
+          });
+          renderSessionQa(snapshot);
+
+          try {
+            const answer = await window.listenBridge.askSessionQuestion(question, panelKey === "review" ? state.selectedReviewSessionId : null);
+            qaState.history.push({
+              role: "assistant",
+              text: answer.answer,
+              evidence: answer.evidence || [],
+            });
+            clearStatusBanner();
+          } catch (error) {
+            const errorMessage = formatError(error);
+            qaState.history.push({
+              role: "system",
+              text: errorMessage,
+            });
+            setStatusBanner("error", errorMessage);
+          } finally {
+            qaState.pending = false;
+            renderSessionQa(state.snapshot);
+            ["active", "review"].forEach((key) => {
+              const refreshedQuestionEl = document.getElementById(`session-question-${key}`);
+              if (refreshedQuestionEl) {
+                refreshedQuestionEl.value = state.sessionQa[key].pendingQuestion || "";
+              }
+            });
+          }
+        });
+      }
+
+      function renderSessionQa(snapshot) {
+        if (activeSessionQaEl) {
+          renderSessionQaPanel(activeSessionQaEl, snapshot, { mode: "active" });
+        }
+
+        if (sessionQaEl) {
+          renderSessionQaPanel(sessionQaEl, snapshot, { mode: "review" });
+        }
+      }
+
+      async function render(snapshot) {
+        state.snapshot = snapshot;
+        syncWorkflowPage(snapshot);
+        await ensureSelectedMeeting(snapshot);
+        ensureReviewData(snapshot);
+        renderConnections(snapshot);
+        renderMeetings(snapshot);
+        renderSelectedMeetingResearch(snapshot);
+        renderSetupStatus(snapshot);
+        renderPopup(snapshot);
+        renderActiveSession(snapshot);
+        renderCaptureHealth(snapshot);
+        renderTranscript(snapshot);
+        renderCoaching(snapshot);
+        renderReviewWorkspace(snapshot);
+        renderSessionQa(snapshot);
+        await ensureCaptureForSnapshot(snapshot);
+      }
+
+      document.getElementById("refresh-calendars").addEventListener("click", async () => {
+        const snapshot = await runUiAction("Refreshing calendars...", () => window.listenBridge.refreshCalendars());
+        await render(snapshot);
+      });
+
+      document.getElementById("end-session").addEventListener("click", async () => {
+        const snapshot = await runUiAction("Ending session...", () => window.listenBridge.endSession());
+        await render(snapshot);
+      });
+
+      document.getElementById("save-coaching-preferences").addEventListener("click", async () => {
+        const preferences = await runUiAction("Saving coaching preferences...", () =>
+          window.listenBridge.saveCoachingPreferences(coachingGuidanceEl.value.trim(), {
+            style: coachingStyleEl.value,
+            directness: coachingDirectnessEl.value,
+            frequency: coachingFrequencyEl.value,
+          })
+        );
+        applyCoachingPreferences(preferences);
+      });
+      checkForUpdatesButtonEl.addEventListener("click", async () => {
+        if (state.updater.availability === "downloaded") {
+          await runUiAction("Installing update...", () => window.listenBridge.installUpdate());
+          return;
+        }
+
+        state.updater = await runUiAction("Checking for updates...", () => window.listenBridge.checkForUpdates());
+        renderUpdaterStatus();
+      });
+      document.getElementById("save-meeting-brief").addEventListener("click", async () => {
+        if (!state.selectedMeetingId) {
+          setStatusBanner("error", "Select a meeting first.");
+          return;
+        }
+
+        await runUiAction("Saving meeting brief...", () => persistMeetingBrief(state.selectedMeetingId));
+      });
+      launchMeetingFromBriefButtonEl.addEventListener("click", async () => {
+        if (!state.selectedMeetingId) {
+          setStatusBanner("error", "Select a meeting first.");
+          return;
+        }
+
+        await launchMeetingWithPreparedContext(state.selectedMeetingId);
+      });
+      document.getElementById("save-org-document").addEventListener("click", async () => {
+        const title = orgDocumentTitleEl.value.trim();
+        const content = orgDocumentContentEl.value.trim();
+        const sourceUrl = orgDocumentLinkEl.value.trim();
+        const selectedFile = orgDocumentFileEl.files?.[0] || null;
+        if (!content && !sourceUrl) {
+          setStatusBanner("error", "Paste content, attach a file, or provide a Google Docs or shared Google Drive link.");
+          return;
+        }
+
+        await runUiAction("Saving org document...", () =>
+          window.listenBridge.saveOrgDocument({
+            title,
+            content,
+            sourceUrl: sourceUrl || null,
+            sourceName: selectedFile?.name || null,
+            mimeType: selectedFile?.type || null,
+          })
+        );
+        state.orgDocuments = await window.listenBridge.listOrgDocuments();
+        renderOrgDocuments();
+        orgDocumentTitleEl.value = "";
+        orgDocumentLinkEl.value = "";
+        orgDocumentContentEl.value = "";
+        orgDocumentFileEl.value = "";
+      });
+      document.getElementById("save-meeting-template").addEventListener("click", async () => {
+        const title = meetingTemplateTitleEl.value.trim();
+        if (!title) {
+          setStatusBanner("error", "Template title is required.");
+          return;
+        }
+
+        await runUiAction("Saving meeting template...", () =>
+          window.listenBridge.saveMeetingTemplate({
+            id: state.editingMeetingTemplateId || undefined,
+            title,
+            context: buildMeetingTemplateContext(),
+          })
+        );
+        state.meetingTemplates = await window.listenBridge.listMeetingTemplates();
+        renderMeetingTemplates();
+        renderMeetingTemplatePicker();
+        renderSetupStatus(state.snapshot);
+        resetMeetingTemplateEditor();
+      });
+      cancelMeetingTemplateEditButtonEl.addEventListener("click", () => {
+        resetMeetingTemplateEditor();
+      });
+      briefTemplateSelectEl.addEventListener("change", () => {
+        state.selectedMeetingTemplateId = briefTemplateSelectEl.value;
+        renderMeetingTemplatePicker();
+      });
+      applyMeetingTemplateButtonEl.addEventListener("click", async () => {
+        await runUiAction("Applying meeting template...", () => applySelectedMeetingTemplate());
+      });
+      navButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          setCurrentPage(button.getAttribute("data-page"));
+        });
+      });
+      closeMeetingModalButtonEl.addEventListener("click", async () => {
+        await closeMeetingModal();
+      });
+      meetingModalEl.addEventListener("click", async (event) => {
+        if (event.target.closest("[data-close-meeting-modal='true']")) {
+          await closeMeetingModal();
+        }
+      });
+      prepTabButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          setPrepTab(button.getAttribute("data-prep-tab"));
+        });
+      });
+      setupTabButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          setSetupTab(button.getAttribute("data-setup-tab"));
+        });
+      });
+      [reviewSearchQueryEl, reviewSearchFunctionEl, reviewSearchDateEl].forEach((input) => {
+        input?.addEventListener("input", () => {
+          void syncReviewFilterSelection();
+        });
+        input?.addEventListener("change", () => {
+          void syncReviewFilterSelection();
+        });
+      });
+      toggleActiveCallDetailsButtonEl.addEventListener("click", () => {
+        state.activeCallDetailsExpanded = !state.activeCallDetailsExpanded;
+        syncActiveCallDetails();
+      });
+      document.addEventListener("keydown", async (event) => {
+        if (event.key === "Escape" && state.meetingModalOpen) {
+          await closeMeetingModal();
+        }
+      });
+      orgDocumentFileEl.addEventListener("change", async () => {
+        const selectedFile = orgDocumentFileEl.files?.[0];
+        if (!selectedFile) {
+          return;
+        }
+
+        orgDocumentTitleEl.value = orgDocumentTitleEl.value || selectedFile.name.replace(/\.[^.]+$/, "");
+        orgDocumentContentEl.value = await selectedFile.text();
+      });
+
+      briefCallFunctionEl.addEventListener("change", syncCallTypeOptions);
+
+      window.listenBridge.onStateUpdate((snapshot) => {
+        void render(snapshot);
+      });
+      window.listenBridge.onUpdaterState((updaterState) => {
+        state.updater = updaterState;
+        renderUpdaterStatus();
+      });
+      state.sidebarCollapsed = readSidebarCollapsedPreference();
+      populateCallFunctionOptions();
+      syncSidebarState();
+      syncActiveCallDetails();
+      syncPageVisibility();
+      syncPrepPanels();
+      syncSetupPanels();
+      Promise.all([
+        window.listenBridge.getRuntimeCapabilities(),
+        window.listenBridge.getUpdaterState(),
+        window.listenBridge.getSnapshot(),
+        window.listenBridge.getCoachingPreferences(),
+        window.listenBridge.listOrgDocuments(),
+        window.listenBridge.listMeetingTemplates(),
+      ])
+        .then(([runtimeCapabilities, updaterState, snapshot, coachingPreferences, orgDocuments, meetingTemplates]) => {
+          state.runtimeCapabilities = runtimeCapabilities;
+          state.updater = updaterState;
+          applyCoachingPreferences(coachingPreferences);
+          state.orgDocuments = orgDocuments;
+          state.meetingTemplates = meetingTemplates;
+          renderOrgDocuments();
+          renderMeetingTemplates();
+          renderMeetingTemplatePicker();
+          renderUpdaterStatus();
+          clearStatusBanner();
+          return render(snapshot);
+        })
+        .catch((error) => {
+          setStatusBanner("error", `Desktop bridge failed to initialize: ${formatError(error)}`);
+        });
+      window.addEventListener("beforeunload", () => {
+        void stopCapture();
+      });
+    </script>
+  </body>
+</html>

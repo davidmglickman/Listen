@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Listen Review</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Aptos", "Segoe UI", sans-serif;
+        --ink: #1f2b37;
+        --muted: #597086;
+        --panel: rgba(255, 255, 255, 0.82);
+        --line: rgba(31, 43, 55, 0.12);
+        --accent: #0c7a5c;
+        --accent-soft: #d8efe5;
+        --bg-1: #f4efe4;
+        --bg-2: #dce7f0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(248, 214, 127, 0.55), transparent 32%),
+          radial-gradient(circle at top right, rgba(101, 176, 153, 0.28), transparent 28%),
+          linear-gradient(160deg, var(--bg-1), var(--bg-2));
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 360px minmax(0, 1fr) 380px;
+        min-height: 100vh;
+      }
+
+      .column {
+        padding: 24px;
+        display: grid;
+        gap: 18px;
+        align-content: start;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 18px;
+        box-shadow: 0 18px 44px rgba(22, 34, 49, 0.08);
+        backdrop-filter: blur(12px);
+      }
+
+      h1, h2, h3 {
+        margin-top: 0;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      input, select, textarea, button {
+        font: inherit;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        padding: 11px 12px;
+        background: rgba(255, 255, 255, 0.88);
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 16px;
+        font-weight: 700;
+        color: white;
+        background: var(--accent);
+        cursor: pointer;
+      }
+
+      button.secondary {
+        color: var(--ink);
+        background: #e7edf2;
+      }
+
+      .session-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .session-item {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 14px;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.76);
+      }
+
+      .session-item.active {
+        border-color: rgba(12, 122, 92, 0.45);
+        box-shadow: inset 0 0 0 1px rgba(12, 122, 92, 0.25);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .detail-grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .split {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .pill {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #e9f2ef;
+        color: #24584a;
+        font-size: 13px;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      @media (max-width: 1180px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <section class="column">
+        <div class="card stack">
+          <div class="eyebrow">Listen Review</div>
+          <h1>Transcripts and Coaching Context</h1>
+          <p class="muted">The desktop app captures meetings. This web layer is for transcript review, summaries, and coaching configuration.</p>
+        </div>
+        <div class="card stack">
+          <h2>Search</h2>
+          <input id="search-query" placeholder="Search meeting title, summary, transcript text" />
+          <select id="search-function">
+            <option value="">All call functions</option>
+            <option value="sales">Sales</option>
+            <option value="recruiting">Recruiting</option>
+            <option value="partnership">Partnership</option>
+            <option value="internal">Internal</option>
+          </select>
+          <input id="search-date" type="date" />
+          <button id="refresh-sessions" class="secondary">Refresh Sessions</button>
+        </div>
+        <div class="card">
+          <h2>Sessions</h2>
+          <div id="session-list" class="session-list"></div>
+        </div>
+        <div class="card">
+          <h2>Upcoming Research</h2>
+          <div id="meeting-research-list" class="session-list"></div>
+        </div>
+      </section>
+
+      <main class="column">
+        <div class="card detail-grid" id="session-detail">
+          <h2>Session Detail</h2>
+          <p class="muted">Select a session to inspect the transcript, coaching, and meeting brief.</p>
+        </div>
+      </main>
+
+      <aside class="column">
+        <div class="card stack">
+          <h2>Coaching Profiles</h2>
+          <label>
+            Org-wide guidance
+            <textarea id="org-guidance" rows="5"></textarea>
+          </label>
+          <label>
+            Org coaching style
+            <select id="org-style">
+              <option value="supportive">Supportive</option>
+              <option value="direct">Direct</option>
+              <option value="challenger">Challenger</option>
+            </select>
+          </label>
+          <label>
+            Org directness
+            <select id="org-directness">
+              <option value="gentle">Gentle</option>
+              <option value="balanced">Balanced</option>
+              <option value="blunt">Blunt</option>
+            </select>
+          </label>
+          <label>
+            Org coaching frequency
+            <select id="org-frequency">
+              <option value="minimal">Minimal</option>
+              <option value="balanced">Balanced</option>
+              <option value="proactive">Proactive</option>
+            </select>
+          </label>
+          <button id="save-org-guidance">Save Org Guidance</button>
+          <label>
+            User guidance
+            <textarea id="user-guidance" rows="5"></textarea>
+          </label>
+          <label>
+            User coaching style
+            <select id="user-style">
+              <option value="supportive">Supportive</option>
+              <option value="direct">Direct</option>
+              <option value="challenger">Challenger</option>
+            </select>
+          </label>
+          <label>
+            User directness
+            <select id="user-directness">
+              <option value="gentle">Gentle</option>
+              <option value="balanced">Balanced</option>
+              <option value="blunt">Blunt</option>
+            </select>
+          </label>
+          <label>
+            User coaching frequency
+            <select id="user-frequency">
+              <option value="minimal">Minimal</option>
+              <option value="balanced">Balanced</option>
+              <option value="proactive">Proactive</option>
+            </select>
+          </label>
+          <button id="save-user-guidance">Save User Guidance</button>
+        </div>
+        <div class="card stack">
+          <h2>Org Context Documents</h2>
+          <div id="document-list" class="stack"></div>
+          <label>
+            Document title
+            <input id="document-title" placeholder="ICP notes" />
+          </label>
+          <label>
+            Attach text document
+            <input id="document-file" type="file" accept=".txt,.md,.json,.csv,.log,.text,text/plain,text/markdown,application/json,text/csv" />
+          </label>
+          <label>
+            Document content
+            <textarea id="document-content" rows="8" placeholder="Paste policy notes, messaging, objection handling, customer context, or upload a text/markdown/json/csv file."></textarea>
+          </label>
+          <button id="save-document">Save Org Document</button>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      const state = {
+        sessions: [],
+        selectedSessionId: null,
+        selectedSession: null,
+        sessionAnswer: null,
+        sessionAnswerError: "",
+        profiles: [],
+        documents: [],
+        meetingResearch: [],
+      };
+
+      const sessionListEl = document.getElementById("session-list");
+      const sessionDetailEl = document.getElementById("session-detail");
+      const searchQueryEl = document.getElementById("search-query");
+      const searchFunctionEl = document.getElementById("search-function");
+      const searchDateEl = document.getElementById("search-date");
+      const orgGuidanceEl = document.getElementById("org-guidance");
+      const userGuidanceEl = document.getElementById("user-guidance");
+      const orgStyleEl = document.getElementById("org-style");
+      const orgDirectnessEl = document.getElementById("org-directness");
+      const orgFrequencyEl = document.getElementById("org-frequency");
+      const userStyleEl = document.getElementById("user-style");
+      const userDirectnessEl = document.getElementById("user-directness");
+      const userFrequencyEl = document.getElementById("user-frequency");
+      const documentListEl = document.getElementById("document-list");
+            function defaultSettings() {
+              return { style: "supportive", directness: "balanced", frequency: "balanced" };
+            }
+
+      const documentTitleEl = document.getElementById("document-title");
+      const documentFileEl = document.getElementById("document-file");
+      const documentContentEl = document.getElementById("document-content");
+      const meetingResearchListEl = document.getElementById("meeting-research-list");
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function formatDate(value) {
+        return new Date(value).toLocaleString();
+      }
+
+      async function fetchJson(url, options) {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+        return response.json();
+      }
+
+      function filteredSessions() {
+        const query = searchQueryEl.value.trim().toLowerCase();
+        const callFunction = searchFunctionEl.value;
+        const date = searchDateEl.value;
+
+        return state.sessions.filter((session) => {
+          const haystack = [session.meetingTitle, session.summary.headline, session.context?.callType, session.context?.callGoal]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          const matchesQuery = !query || haystack.includes(query);
+          const matchesFunction = !callFunction || session.context?.callFunction === callFunction;
+          const matchesDate = !date || session.completedAt.startsWith(date);
+          return matchesQuery && matchesFunction && matchesDate;
+        });
+      }
+
+      function renderSessions() {
+        const sessions = filteredSessions();
+        if (!sessions.length) {
+          sessionListEl.innerHTML = '<p class="muted">No stored sessions yet. Run a meeting from the desktop app first.</p>';
+          return;
+        }
+
+        sessionListEl.innerHTML = sessions
+          .map((session) => `
+            <div class="session-item ${session.sessionId === state.selectedSessionId ? "active" : ""}" data-session-id="${session.sessionId}">
+              <div class="eyebrow">${session.context?.callFunction ?? "session"}</div>
+              <h3>${session.meetingTitle}</h3>
+              <p>${session.summary.headline}</p>
+              <div class="muted">${formatDate(session.completedAt)}</div>
+            </div>
+          `)
+          .join("");
+
+        document.querySelectorAll("[data-session-id]").forEach((item) => {
+          item.addEventListener("click", async () => {
+            state.selectedSessionId = item.getAttribute("data-session-id");
+            renderSessions();
+            await loadSessionDetail(state.selectedSessionId);
+          });
+        });
+      }
+
+      async function loadSessions() {
+        const payload = await fetchJson("/api/sessions");
+        state.sessions = payload.sessions;
+        if (!state.selectedSessionId && state.sessions.length) {
+          state.selectedSessionId = state.sessions[0].sessionId;
+        }
+        renderSessions();
+        if (state.selectedSessionId) {
+          await loadSessionDetail(state.selectedSessionId);
+        }
+      }
+
+      function renderMeetingResearch() {
+        if (!state.meetingResearch.length) {
+          meetingResearchListEl.innerHTML = '<p class="muted">No meeting research available yet.</p>';
+          return;
+        }
+
+        meetingResearchListEl.innerHTML = state.meetingResearch
+          .map((meeting) => `
+            <div class="session-item">
+              <div class="eyebrow">${meeting.status}</div>
+              <h3>${meeting.meetingExternalId}</h3>
+              <p>${meeting.personSummary ?? "Prospect research pending."}</p>
+              <div class="muted">${meeting.organizationSummary ?? "Organization summary pending."}</div>
+            </div>
+          `)
+          .join("");
+      }
+
+      async function loadMeetingResearch() {
+        const payload = await fetchJson("/api/admin/research/meetings?limit=25");
+        state.meetingResearch = payload.meetings || [];
+        renderMeetingResearch();
+      }
+
+      function renderSessionDetail(session) {
+        const answerBlock = state.sessionAnswer
+          ? `
+            <div class="card">
+              <h3>Answer</h3>
+              <p>${escapeHtml(state.sessionAnswer.answer)}</p>
+              ${state.sessionAnswer.evidence?.length ? `<ul>${state.sessionAnswer.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<p class="muted">No supporting evidence returned.</p>'}
+            </div>
+          `
+          : state.sessionAnswerError
+            ? `<div class="card"><h3>Answer</h3><p class="muted">${escapeHtml(state.sessionAnswerError)}</p></div>`
+            : '<div class="card"><h3>Answer</h3><p class="muted">Ask a question about this meeting using its transcript, summary, coaching, and org context.</p></div>';
+
+        sessionDetailEl.innerHTML = `
+          <div class="eyebrow">${session.context?.callFunction ?? "session"}</div>
+          <h2>${session.meetingTitle}</h2>
+          <p class="muted">${formatDate(session.startedAt)} to ${formatDate(session.completedAt)}</p>
+          <div class="split">
+            <div class="card">
+              <h3>Summary</h3>
+              <p><strong>${session.summary.headline}</strong></p>
+              <div class="pill-row">${(session.summary.coachingRecap || []).map((item) => `<span class="pill">${item}</span>`).join("") || '<span class="muted">No recap items</span>'}</div>
+            </div>
+            <div class="card">
+              <h3>Meeting Brief</h3>
+              ${session.context ? `
+                <p><strong>Type:</strong> ${session.context.callType}</p>
+                <p><strong>Goal:</strong> ${session.context.callGoal}</p>
+                <p><strong>Roles:</strong> ${session.context.userRole} with ${session.context.guestRole}</p>
+                <p><strong>Outcome:</strong> ${session.context.desiredOutcome}</p>
+                <p><strong>Notes:</strong> ${session.context.notes || "none"}</p>
+              ` : '<p class="muted">No meeting brief was saved for this session.</p>'}
+            </div>
+          </div>
+          <div class="split">
+            <div class="card">
+              <h3>Ask About This Session</h3>
+              <label>
+                Question
+                <textarea id="session-question" rows="3" placeholder="What objection came up most clearly? What did the prospect care about? What follow-up should I send?"></textarea>
+              </label>
+              <button id="ask-session-question" class="secondary">Ask</button>
+            </div>
+            ${answerBlock}
+          </div>
+          <div class="split">
+            <div class="card">
+              <h3>Transcript</h3>
+              ${session.transcript.length ? `<ul>${session.transcript.map((segment) => `<li><strong>${segment.speakerLabel || segment.source}:</strong> ${segment.text}</li>`).join("")}</ul>` : '<p class="muted">No transcript stored.</p>'}
+            </div>
+            <div class="card">
+              <h3>Coaching</h3>
+              ${session.coaching.length ? `<ul>${session.coaching.map((prompt) => `<li><strong>${prompt.speakerLabel ? `${prompt.speakerLabel} - ` : ""}${prompt.title}:</strong> ${prompt.message}</li>`).join("")}</ul>` : '<p class="muted">No coaching prompts stored.</p>'}
+            </div>
+          </div>
+        `;
+
+        const askButton = document.getElementById("ask-session-question");
+        const questionEl = document.getElementById("session-question");
+        askButton?.addEventListener("click", async () => {
+          const question = questionEl.value.trim();
+          if (!question || !state.selectedSessionId) {
+            return;
+          }
+
+          state.sessionAnswer = null;
+          state.sessionAnswerError = "Working...";
+          renderSessionDetail(session);
+
+          try {
+            state.sessionAnswer = await fetchJson(`/api/sessions/${state.selectedSessionId}/questions`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ question }),
+            });
+            state.sessionAnswerError = "";
+          } catch (error) {
+            state.sessionAnswer = null;
+            state.sessionAnswerError = error instanceof Error ? error.message : "Question request failed.";
+          }
+
+          renderSessionDetail(session);
+          const refreshedQuestionEl = document.getElementById("session-question");
+          if (refreshedQuestionEl) {
+            refreshedQuestionEl.value = question;
+          }
+        });
+      }
+
+      async function loadSessionDetail(sessionId) {
+        const session = await fetchJson(`/api/sessions/${sessionId}`);
+        state.selectedSession = session;
+        state.sessionAnswer = null;
+        state.sessionAnswerError = "";
+        renderSessionDetail(session);
+      }
+
+      function renderDocuments() {
+        if (!state.documents.length) {
+          documentListEl.innerHTML = '<p class="muted">No org documents attached yet.</p>';
+          return;
+        }
+
+        documentListEl.innerHTML = state.documents
+          .map((document) => `
+            <div class="card">
+              <strong>${document.title}</strong>
+              <div class="muted">${document.sourceName || "manual"}${document.mimeType ? ` / ${document.mimeType}` : ""}</div>
+              <p>${document.content.slice(0, 180)}${document.content.length > 180 ? "..." : ""}</p>
+              <button class="secondary" data-delete-document="${document.id}">Delete</button>
+            </div>
+          `)
+          .join("");
+
+        document.querySelectorAll("[data-delete-document]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await fetchJson(`/api/context/documents/${button.getAttribute("data-delete-document")}`, { method: "DELETE" });
+            await loadContext();
+          });
+        });
+      }
+
+      async function loadContext() {
+        const payload = await fetchJson("/api/context");
+        state.profiles = payload.profiles;
+        state.documents = payload.documents || [];
+        const orgProfile = state.profiles.find((profile) => profile.scope === "org") || { guidance: "", settings: defaultSettings() };
+        const userProfile = state.profiles.find((profile) => profile.scope === "user" && profile.scopeId === "self") || { guidance: "", settings: defaultSettings() };
+        orgGuidanceEl.value = orgProfile.guidance || "";
+        userGuidanceEl.value = userProfile.guidance || "";
+        orgStyleEl.value = orgProfile.settings?.style || "supportive";
+        orgDirectnessEl.value = orgProfile.settings?.directness || "balanced";
+        orgFrequencyEl.value = orgProfile.settings?.frequency || "balanced";
+        userStyleEl.value = userProfile.settings?.style || orgStyleEl.value || "supportive";
+        userDirectnessEl.value = userProfile.settings?.directness || orgDirectnessEl.value || "balanced";
+        userFrequencyEl.value = userProfile.settings?.frequency || orgFrequencyEl.value || "balanced";
+        renderDocuments();
+      }
+
+      async function saveProfile(id, scope, scopeId, label, guidance, settings) {
+        await fetchJson(`/api/context/profiles/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scope, scopeId, label, guidance, settings }),
+        });
+        await loadContext();
+      }
+
+      async function saveDocument() {
+        const title = documentTitleEl.value.trim();
+        const content = documentContentEl.value.trim();
+        const selectedFile = documentFileEl.files?.[0] || null;
+        if (!title || !content) {
+          throw new Error("Document title and content are required.");
+        }
+
+        const documentId = `orgdoc:${Date.now()}`;
+        await fetchJson(`/api/context/documents/${documentId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            content,
+            sourceName: selectedFile?.name || null,
+            mimeType: selectedFile?.type || null,
+          }),
+        });
+
+        documentTitleEl.value = "";
+        documentContentEl.value = "";
+        documentFileEl.value = "";
+        await loadContext();
+      }
+
+      document.getElementById("refresh-sessions").addEventListener("click", () => {
+        void loadSessions();
+      });
+      document.getElementById("save-org-guidance").addEventListener("click", () => {
+        void saveProfile("org:default", "org", "default", "Default org guidance", orgGuidanceEl.value, {
+          style: orgStyleEl.value,
+          directness: orgDirectnessEl.value,
+          frequency: orgFrequencyEl.value,
+        });
+      });
+      document.getElementById("save-user-guidance").addEventListener("click", () => {
+        void saveProfile("user:self", "user", "self", "Default personal focus", userGuidanceEl.value, {
+          style: userStyleEl.value,
+          directness: userDirectnessEl.value,
+          frequency: userFrequencyEl.value,
+        });
+      });
+      document.getElementById("save-document").addEventListener("click", () => {
+        void saveDocument();
+      });
+      documentFileEl.addEventListener("change", async () => {
+        const selectedFile = documentFileEl.files?.[0];
+        if (!selectedFile) {
+          return;
+        }
+
+        documentTitleEl.value = documentTitleEl.value || selectedFile.name.replace(/\.[^.]+$/, "");
+        documentContentEl.value = await selectedFile.text();
+      });
+      [searchQueryEl, searchFunctionEl, searchDateEl].forEach((input) => {
+        input.addEventListener("input", renderSessions);
+        input.addEventListener("change", renderSessions);
+      });
+
+      void loadSessions();
+      void loadContext();
+      void loadMeetingResearch();
+    </script>
+  </body>
+</html>
