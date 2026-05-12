@@ -198,6 +198,18 @@ export class CalendarService {
     ];
   }
 
+  private async handleTokenRefreshFailure(provider: "google" | "microsoft", error: unknown): Promise<StoredOAuthToken | null> {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/status 400\b/i.test(message) && !/invalid[_ ]grant/i.test(message)) {
+      throw error;
+    }
+
+    this.auth[provider] = null;
+    await this.sessionStore.writeAuthToken(provider, null);
+    this.connections = this.buildConnections();
+    return null;
+  }
+
   private async fetchProviderMeetings(provider: "google" | "microsoft"): Promise<MeetingRecord[]> {
     const token = await this.ensureActiveToken(provider);
     if (!token) {
@@ -238,9 +250,22 @@ export class CalendarService {
       return token;
     }
 
-    const refreshed = provider === "google"
-      ? await this.googleOAuthClient.refreshAccessToken(token.refreshToken)
-      : await this.microsoftOAuthClient.refreshAccessToken(token.refreshToken);
+    const refreshToken = token.refreshToken;
+
+    const refreshed = await (async () => {
+      try {
+        return provider === "google"
+          ? await this.googleOAuthClient.refreshAccessToken(refreshToken)
+          : await this.microsoftOAuthClient.refreshAccessToken(refreshToken);
+      } catch (error) {
+        return this.handleTokenRefreshFailure(provider, error);
+      }
+    })();
+
+    if (!refreshed) {
+      return null;
+    }
+
     this.auth[provider] = refreshed;
     await this.sessionStore.writeAuthToken(provider, refreshed);
     return refreshed;

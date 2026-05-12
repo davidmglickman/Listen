@@ -903,7 +903,7 @@ async function installDownloadedUpdate(): Promise<void> {
     throw new Error("No downloaded update is ready to install.");
   }
 
-  autoUpdater.quitAndInstall();
+  autoUpdater.quitAndInstall(false, true);
 }
 
 function normalizeCoachingSettings(value: unknown): CoachingSettings {
