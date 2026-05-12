@@ -112,6 +112,7 @@ contextBridge.exposeInMainWorld("listenBridge", {
   askContextQuestion: (payload: ContextQuestionPayload): Promise<SessionQuestionAnswer> => ipcRenderer.invoke("context:ask-question", payload),
   listSessions: (limit = 20): Promise<SessionHistoryItem[]> => ipcRenderer.invoke("session:list", limit),
   getSession: (sessionId: string): Promise<SessionHistoryDetail> => ipcRenderer.invoke("session:get", sessionId),
+  deleteSession: (sessionId: string): Promise<void> => ipcRenderer.invoke("session:delete", sessionId),
   refreshCalendars: (): Promise<AppSnapshot> => ipcRenderer.invoke("calendar:refresh"),
   getMeetingBrief: (meetingId: string): Promise<MeetingContext | null> => ipcRenderer.invoke("meeting:brief:get", meetingId),
   saveMeetingBrief: (meetingId: string, context: MeetingContext): Promise<MeetingContext> => ipcRenderer.invoke("meeting:brief:save", meetingId, context),
@@ -178,6 +179,7 @@ declare global {
       askContextQuestion(payload: ContextQuestionPayload): Promise<SessionQuestionAnswer>;
       listSessions(limit?: number): Promise<SessionHistoryItem[]>;
       getSession(sessionId: string): Promise<SessionHistoryDetail>;
+      deleteSession(sessionId: string): Promise<void>;
       refreshCalendars(): Promise<AppSnapshot>;
       getMeetingBrief(meetingId: string): Promise<MeetingContext | null>;
       saveMeetingBrief(meetingId: string, context: MeetingContext): Promise<MeetingContext>;

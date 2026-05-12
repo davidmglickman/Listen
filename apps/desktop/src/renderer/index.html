@@ -317,6 +317,12 @@
         align-content: start;
       }
 
+      .inline-prep-top-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
       .inline-prep-template-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -765,6 +771,13 @@
         padding-right: 4px;
       }
 
+      .review-session-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: stretch;
+      }
+
       .review-session-button {
         width: 100%;
         text-align: left;
@@ -793,6 +806,11 @@
         color: var(--text-muted);
       }
 
+      .review-session-delete {
+        align-self: center;
+        padding-inline: 12px;
+      }
+
       .review-detail-stack {
         display: grid;
         gap: 20px;
@@ -808,6 +826,12 @@
         align-items: flex-start;
         justify-content: space-between;
         gap: 16px;
+      }
+
+      .review-session-header-actions {
+        display: grid;
+        justify-items: end;
+        gap: 12px;
       }
 
       .review-summary-grid {
@@ -1638,10 +1662,10 @@
               <strong>Meetings</strong>
             </button>
             <button class="nav-button" data-page="call">
-              <strong>Active Call</strong>
+              <strong>Active Meeting</strong>
             </button>
             <button class="nav-button" data-page="review">
-              <strong>Review</strong>
+              <strong>Past Meetings</strong>
             </button>
             <button class="nav-button" data-page="settings">
               <strong>Setup</strong>
@@ -1685,21 +1709,21 @@
                   </div>
                   <div class="brief-primary-actions">
                     <button id="save-meeting-brief" class="secondary">Save Brief</button>
-                    <button id="launch-meeting-from-brief">Launch Call</button>
+                    <button id="launch-meeting-from-brief">Start Meeting</button>
                   </div>
                 </div>
               </div>
               <div class="brief-layout">
                 <label class="brief-card">
-                  <span class="brief-label">Call Function</span>
+                  <span class="brief-label">Meeting Category</span>
                   <select id="brief-call-function"></select>
                 </label>
                 <label class="brief-card">
-                  <span class="brief-label">Call Type</span>
+                  <span class="brief-label">Meeting Type</span>
                   <select id="brief-call-type"></select>
                 </label>
                 <label class="brief-card">
-                  <span class="brief-label">Call Goal</span>
+                  <span class="brief-label">Meeting Goal</span>
                   <input id="brief-call-goal" value="book discovery" />
                 </label>
                 <label class="brief-card half">
@@ -1731,7 +1755,7 @@
             <div id="prep-panel-history" class="workspace-panel">
               <div>
                 <h3>History</h3>
-                <p class="muted">Email history and prior Listen sessions related to the selected meeting.</p>
+                <p class="muted">Email history and prior meetings related to the selected meeting.</p>
               </div>
               <div id="selected-meeting-history" class="research-scroll"></div>
               <div id="selected-meeting-history-qa" class="card review-qa-card"></div>
@@ -1763,12 +1787,12 @@
               <div class="card hero-card active-call-hero">
                 <div class="card-header">
                   <div>
-                    <div class="eyebrow">Active Call</div>
-                    <h2>Call Workspace</h2>
-                    <p class="muted">Stay centered on coaching and in-call questions. Transcript and call diagnostics live behind the details toggle.</p>
+                    <div class="eyebrow">Active Meeting</div>
+                    <h2>Meeting Workspace</h2>
+                    <p class="muted">Stay centered on coaching and live questions. Transcript and meeting diagnostics live behind the details toggle.</p>
                   </div>
                   <div class="meeting-actions">
-                    <button id="toggle-active-call-details" class="secondary">Show Call Details</button>
+                    <button id="toggle-active-call-details" class="secondary">Show Meeting Details</button>
                     <button id="end-session" class="secondary">End Session</button>
                   </div>
                 </div>
@@ -1776,8 +1800,8 @@
               <div id="active-call-header" class="active-call-header hidden">
                 <div class="card active-call-meta">
                   <div>
-                    <h2>Session Overview</h2>
-                    <div id="active-session">No active session.</div>
+                    <h2>Meeting Overview</h2>
+                    <div id="active-session">No active meeting.</div>
                   </div>
                 </div>
                 <div class="card active-call-meta">
@@ -1810,7 +1834,7 @@
                   </div>
                   <div class="card active-call-qa-card">
                     <div>
-                      <h2>Ask About This Call</h2>
+                        <h2>Ask About This Meeting</h2>
                       <p class="muted">Use the live transcript and meeting context when you need a fast answer.</p>
                     </div>
                     <div id="active-session-qa"></div>
@@ -1823,8 +1847,8 @@
           <section class="page" data-page="review">
             <div class="card hero-card page-intro">
               <div class="eyebrow">Review</div>
-              <h2>Call History</h2>
-              <p class="muted">Browse previous calls, inspect transcript and coaching detail, and ask follow-up questions against any saved session.</p>
+              <h2>Past Meetings</h2>
+              <p class="muted">Browse past meetings, inspect the transcript and coaching detail, and ask follow-up questions against any saved meeting.</p>
               <div class="page-chip-row">
                 <span class="page-chip">History</span>
                 <span class="page-chip">Transcript</span>
@@ -1835,11 +1859,11 @@
             <div class="review-layout">
               <div class="card review-history-panel">
                 <div>
-                  <h2>Previous Calls</h2>
-                  <p class="muted">Choose a saved Listen session to reopen the summary, transcript, and coaching trail.</p>
+                  <h2>Saved Meetings</h2>
+                  <p class="muted">Choose a saved meeting to reopen the summary, transcript, and coaching trail.</p>
                 </div>
                 <div class="inline-actions">
-                  <div class="meta-line">Saved sessions from the realtime history store.</div>
+                  <div class="meta-line">Saved meetings from the realtime history store.</div>
                   <button id="refresh-review-sessions" class="secondary">Refresh</button>
                 </div>
                 <div class="field-grid">
@@ -1848,9 +1872,9 @@
                     <input id="review-search-query" placeholder="Search title, headline, notes, or transcript" />
                   </label>
                   <label>
-                    Call function
+                    Meeting category
                     <select id="review-search-function">
-                      <option value="">All call functions</option>
+                      <option value="">All meeting categories</option>
                       <option value="sales">Sales</option>
                       <option value="recruiting">Recruiting</option>
                       <option value="partnership">Partnership</option>
@@ -1868,8 +1892,8 @@
                 <div id="review-session-detail" class="card review-focus-card"></div>
                 <div class="card review-qa-card">
                   <div>
-                    <h2>Ask About This Call</h2>
-                    <p class="muted">Query the selected saved call using its transcript, coaching trail, and stored meeting context.</p>
+                    <h2>Ask About This Meeting</h2>
+                    <p class="muted">Query the selected saved meeting using its transcript, coaching trail, and stored meeting context.</p>
                   </div>
                   <div id="session-qa"></div>
                 </div>
@@ -1996,7 +2020,7 @@
                 <div id="setup-panel-templates" class="workspace-panel">
                   <div>
                     <h3>Meeting Templates</h3>
-                    <p class="muted">Save reusable call briefs so common meeting setups do not need to be rewritten each time.</p>
+                    <p class="muted">Save reusable meeting briefs so common meeting setups do not need to be rewritten each time.</p>
                   </div>
                   <div id="meeting-template-list" class="stack"></div>
                   <div class="field-grid">
@@ -2005,7 +2029,7 @@
                       <input id="meeting-template-title" placeholder="Sales discovery" />
                     </label>
                     <label>
-                      Call function
+                      Meeting category
                       <select id="meeting-template-function">
                         <option value="sales">Sales</option>
                         <option value="recruiting">Recruiting</option>
@@ -2014,11 +2038,11 @@
                       </select>
                     </label>
                     <label>
-                      Call type
-                      <input id="meeting-template-type" placeholder="discovery call" />
+                      Meeting type
+                      <input id="meeting-template-type" placeholder="discovery meeting" />
                     </label>
                     <label>
-                      Call goal
+                      Meeting goal
                       <input id="meeting-template-goal" placeholder="book discovery" />
                     </label>
                     <label>
@@ -2234,7 +2258,7 @@
       function defaultMeetingContext() {
         return {
           callFunction: "sales",
-          callType: "discovery call",
+          callType: "discovery meeting",
           callGoal: "book discovery",
           userRole: "AE",
           guestRole: "prospect",
@@ -2297,7 +2321,7 @@
       function syncActiveCallDetails() {
         const expanded = Boolean(state.activeCallDetailsExpanded);
         activeCallHeaderEl.classList.toggle("hidden", !expanded);
-        toggleActiveCallDetailsButtonEl.textContent = expanded ? "Hide Call Details" : "Show Call Details";
+        toggleActiveCallDetailsButtonEl.textContent = expanded ? "Hide Meeting Details" : "Show Meeting Details";
         toggleActiveCallDetailsButtonEl.setAttribute("aria-expanded", expanded ? "true" : "false");
       }
 
@@ -2573,7 +2597,7 @@
 
         state.reviewSessions = {
           status: "loading",
-          note: "Loading saved Listen sessions...",
+          note: "Loading saved meetings...",
           items: state.reviewSessions.items || [],
         };
         renderReviewWorkspace(state.snapshot);
@@ -2582,7 +2606,7 @@
           const items = await window.listenBridge.listSessions(100);
           state.reviewSessions = {
             status: "ready",
-            note: items.length ? "Recent calls captured by Listen." : "No saved calls yet. Finish one call and it will appear here.",
+            note: items.length ? "Recent meetings captured by Listen." : "No saved meetings yet. Finish one meeting and it will appear here.",
             items,
           };
 
@@ -2665,6 +2689,29 @@
         renderReviewWorkspace(state.snapshot);
         renderSessionQa(state.snapshot);
         await loadReviewSessionDetail(sessionId);
+      }
+
+      async function deleteReviewSession(sessionId) {
+        const session = state.reviewSessions.items.find((item) => item.sessionId === sessionId);
+        if (!session) {
+          return;
+        }
+
+        const approved = window.confirm(`Delete the saved meeting \"${session.meetingTitle}\"? This removes its transcript, summary, and coaching history.`);
+        if (!approved) {
+          return;
+        }
+
+        const deletedSelectedSession = state.selectedReviewSessionId === sessionId;
+        await runUiAction("Deleting saved meeting...", () => window.listenBridge.deleteSession(sessionId));
+        delete state.reviewSessionDetails[sessionId];
+        if (deletedSelectedSession) {
+          state.selectedReviewSessionId = null;
+          resetQaThread("review");
+          state.sessionQa.review.pendingQuestion = "";
+        }
+
+        await loadReviewSessions({ force: true });
       }
 
       function selectReviewDocument(documentId) {
@@ -2932,10 +2979,10 @@
       }
 
       const callTypeOptions = {
-        sales: ["outbound prospecting", "discovery call", "demo", "follow-up", "negotiation", "renewal"],
-        recruiting: ["recruiter screen", "hiring manager screen", "panel interview", "closing call"],
-        partnership: ["intro call", "qualification", "solution alignment", "negotiation"],
-        internal: ["1:1", "pipeline review", "forecast call", "project sync", "performance discussion"],
+        sales: ["outbound prospecting", "discovery meeting", "demo", "follow-up meeting", "negotiation", "renewal"],
+        recruiting: ["recruiter screen", "hiring manager screen", "panel interview", "closing meeting"],
+        partnership: ["intro meeting", "qualification", "solution alignment", "negotiation"],
+        internal: ["1:1", "pipeline review", "forecast meeting", "project sync", "performance discussion"],
       };
 
       function setStatusBanner(kind, message) {
@@ -3011,7 +3058,7 @@
           },
           {
             title: "Save meeting templates",
-            detail: hasTemplates ? `${state.meetingTemplates.length} reusable call briefs saved.` : "Save repeatable call setups so meeting briefs start from a stronger baseline.",
+            detail: hasTemplates ? `${state.meetingTemplates.length} reusable meeting briefs saved.` : "Save repeatable meeting setups so meeting briefs start from a stronger baseline.",
             complete: hasTemplates,
           },
         ]
@@ -3311,9 +3358,9 @@
             createQuestionContextDocument("Prior Listen sessions", buildSessionHistoryContextBlock(sessionHistory)),
             createQuestionContextDocument("Google Drive transcript history", buildDriveHistoryContextBlock(driveHistory)),
             createQuestionContextDocument("Meeting brief", [
-              `Call function: ${baseContext.callFunction || ""}`,
-              `Call type: ${baseContext.callType || ""}`,
-              `Call goal: ${baseContext.callGoal || ""}`,
+              `Meeting category: ${baseContext.callFunction || ""}`,
+              `Meeting type: ${baseContext.callType || ""}`,
+              `Meeting goal: ${baseContext.callGoal || ""}`,
               `Your role: ${baseContext.userRole || ""}`,
               `Guest role: ${baseContext.guestRole || ""}`,
               `Desired outcome: ${baseContext.desiredOutcome || ""}`,
@@ -3468,6 +3515,9 @@
                   </div>
                 </div>
                 <div class="inline-prep-actions">
+                  <div class="inline-prep-top-actions">
+                    <button id="inline-close-meeting-prep" class="secondary">Collapse</button>
+                  </div>
                   <div class="inline-prep-template-row">
                     <select id="inline-brief-template-select">
                       <option value="">Choose template</option>
@@ -3478,21 +3528,21 @@
                   <div class="inline-prep-button-row">
                     <button id="inline-open-meeting-details" class="secondary">Details</button>
                     <button id="inline-save-meeting-brief" class="secondary">Save Brief</button>
-                    <button id="inline-launch-meeting" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>Launch Call</button>
+                    <button id="inline-launch-meeting" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>Start Meeting</button>
                   </div>
                 </div>
               </div>
               <div class="brief-layout">
                 <label class="brief-card">
-                  <span class="brief-label">Call Function</span>
+                  <span class="brief-label">Meeting Category</span>
                   <select id="inline-brief-call-function"></select>
                 </label>
                 <label class="brief-card">
-                  <span class="brief-label">Call Type</span>
+                  <span class="brief-label">Meeting Type</span>
                   <select id="inline-brief-call-type"></select>
                 </label>
                 <label class="brief-card">
-                  <span class="brief-label">Call Goal</span>
+                  <span class="brief-label">Meeting Goal</span>
                   <input id="inline-brief-call-goal" value="${escapeHtml(context.callGoal || "")}" />
                 </label>
                 <label class="brief-card half">
@@ -3578,7 +3628,7 @@
 
         state.meetingSessionHistory[meetingId] = {
           status: "loading",
-          note: "Finding related prior Listen sessions...",
+          note: "Finding related prior meetings...",
           sessions: [],
         };
         renderSelectedMeetingResearch(state.snapshot);
@@ -3648,7 +3698,7 @@
           selectedMeetingTitleEl.textContent = "Meeting Brief";
           selectedMeetingMetaEl.innerHTML = "";
           selectedMeetingResearchEl.innerHTML = '<div class="section-empty">Select a meeting to review its research and call brief.</div>';
-          selectedMeetingHistoryEl.innerHTML = '<div class="section-empty">Select a meeting to review related email and prior sessions.</div>';
+          selectedMeetingHistoryEl.innerHTML = '<div class="section-empty">Select a meeting to review related email and prior meetings.</div>';
           applyMeetingContext(defaultMeetingContext());
           renderMeetingTemplatePicker();
           renderSessionQa(state.snapshot);
@@ -3857,25 +3907,25 @@
           const meetingContext = contextMeetingId ? await buildLaunchMeetingContext(contextMeetingId, baseContext) : baseContext;
           const approved = window.confirm(
             meetingId
-              ? "Listen detected sustained microphone activity near a scheduled meeting. Start a session now?"
-              : "Listen detected sustained microphone activity. Start a session for an instant meeting now?",
+              ? "Listen detected sustained microphone activity near a scheduled meeting. Start the meeting now?"
+              : "Listen detected sustained microphone activity. Start an instant meeting now?",
           );
           if (!approved) {
-            setStatusBanner("info", "Automatic session start was skipped.");
+            setStatusBanner("info", "Automatic meeting start was skipped.");
             return;
           }
           setStatusBanner(
             "info",
             meetingId
-              ? "Detected sustained microphone activity. Starting a Listen session for the nearest scheduled meeting."
-              : "Detected sustained microphone activity. Starting a Listen session for an instant meeting.",
+              ? "Detected sustained microphone activity. Starting the nearest scheduled meeting."
+              : "Detected sustained microphone activity. Starting an instant meeting.",
           );
-          const snapshot = await runUiAction("Starting session from microphone activity...", () =>
+          const snapshot = await runUiAction("Starting meeting from microphone activity...", () =>
             window.listenBridge.autoStartMeeting(meetingId, meetingContext)
           );
           await render(snapshot);
         } catch (error) {
-          setStatusBanner("error", `Automatic session start failed: ${formatError(error)}`);
+          setStatusBanner("error", `Automatic meeting start failed: ${formatError(error)}`);
         } finally {
           backgroundMicMonitorState.triggerPending = false;
         }
@@ -4328,7 +4378,7 @@
                   </div>
                   <div class="meeting-card-actions">
                     <button class="secondary meeting-details-button" data-open-details="${meeting.id}">Details</button>
-                      <button class="meeting-launch-button" data-launch="${meeting.id}" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>Prep Before Launch</button>
+                      <button class="meeting-launch-button" data-launch="${meeting.id}" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>${showInlinePrep ? "Hide Prep" : "Prep Before Launch"}</button>
                   </div>
                 </div>
                 ${showInlinePrep ? buildInlineMeetingPrepMarkup(meeting) : ""}
@@ -4360,6 +4410,12 @@
               return;
             }
 
+            if (state.meetingLaunchPrepOpen && state.selectedMeetingId === meetingId) {
+              state.meetingLaunchPrepOpen = false;
+              renderMeetings(state.snapshot);
+              return;
+            }
+
             await selectMeeting(meetingId);
             state.meetingModalOpen = false;
             state.meetingLaunchPrepOpen = true;
@@ -4386,6 +4442,7 @@
         const desiredOutcomeEl = document.getElementById("inline-brief-desired-outcome");
         const notesEl = document.getElementById("inline-brief-notes");
         const templateSelectEl = document.getElementById("inline-brief-template-select");
+        const closePrepButtonEl = document.getElementById("inline-close-meeting-prep");
 
         const syncInlineCallTypeOptions = () => {
           const options = callTypeOptions[callFunctionEl.value] || [];
@@ -4399,6 +4456,11 @@
           .join("");
         callFunctionEl.value = context.callFunction || "sales";
         syncInlineCallTypeOptions();
+
+        closePrepButtonEl?.addEventListener("click", () => {
+          state.meetingLaunchPrepOpen = false;
+          renderMeetings(state.snapshot);
+        });
 
         const updateDraft = () => {
           state.meetingContexts[meeting.id] = {
@@ -4545,15 +4607,15 @@
               </div>
               <div class="research-section full-width">
                 <div class="inline-actions">
-                  <h3>Previous Listen Sessions</h3>
+                  <h3>Previous Meetings</h3>
                   <button id="refresh-meeting-sessions" class="secondary">Refresh</button>
                 </div>
                 ${!sessionHistory || sessionHistory.status === "loading"
-                  ? '<div class="section-empty">Finding related prior Listen sessions...</div>'
+                  ? '<div class="section-empty">Finding related prior meetings...</div>'
                   : sessionHistory.status === "error"
-                    ? `<div class="section-empty">${escapeHtml(sessionHistory.note || "Prior session history could not be loaded.")}</div>`
+                    ? `<div class="section-empty">${escapeHtml(sessionHistory.note || "Prior meeting history could not be loaded.")}</div>`
                   : sessionHistory.sessions?.length
-                    ? `<p class="muted">${escapeHtml(sessionHistory.note || "Related prior Listen sessions.")}</p><div class="session-history-list">${sessionHistory.sessions.map((session) => `
+                    ? `<p class="muted">${escapeHtml(sessionHistory.note || "Related prior meetings.")}</p><div class="session-history-list">${sessionHistory.sessions.map((session) => `
                         <div class="session-history-item">
                           <strong>${escapeHtml(session.meetingTitle)}</strong>
                           <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
@@ -4562,7 +4624,7 @@
                           <div class="meta-line">${escapeHtml(session.matchReason)}</div>
                         </div>
                       `).join("")}</div>`
-                    : `<div class="section-empty">${escapeHtml(sessionHistory?.note || "No related Listen sessions found.")}</div>`}
+                    : `<div class="section-empty">${escapeHtml(sessionHistory?.note || "No related meetings found.")}</div>`}
               </div>
               <div class="research-section full-width">
                 <div class="inline-actions">
@@ -4793,29 +4855,32 @@
         const filteredSessions = getFilteredReviewSessions();
 
         const sessionMarkup = sessionsState.status === "loading" && !sessionsState.items.length
-          ? '<div class="section-empty">Loading saved Listen sessions...</div>'
+          ? '<div class="section-empty">Loading saved meetings...</div>'
           : sessionsState.status === "error"
-            ? `<div class="section-empty">${escapeHtml(sessionsState.note || "Saved session history could not be loaded.")}</div>`
+            ? `<div class="section-empty">${escapeHtml(sessionsState.note || "Saved meeting history could not be loaded.")}</div>`
             : filteredSessions.length
               ? filteredSessions.map((session) => `
-                  <button class="review-session-button ${session.sessionId === state.selectedReviewSessionId ? "active" : ""}" data-review-session-id="${session.sessionId}">
-                    <div class="row-between">
-                      <strong>${escapeHtml(session.meetingTitle)}</strong>
-                      <span class="badge ${session.sessionId === snapshot?.lastSummary?.sessionId ? "success" : "neutral"}">${session.sessionId === snapshot?.lastSummary?.sessionId ? "latest" : "saved"}</span>
-                    </div>
-                    <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
-                    <div class="muted">${escapeHtml(session.summary?.headline || "No summary headline")}</div>
-                  </button>
+                  <div class="review-session-row">
+                    <button class="review-session-button ${session.sessionId === state.selectedReviewSessionId ? "active" : ""}" data-review-session-id="${escapeHtml(session.sessionId)}">
+                      <div class="row-between">
+                        <strong>${escapeHtml(session.meetingTitle)}</strong>
+                        <span class="badge ${session.sessionId === snapshot?.lastSummary?.sessionId ? "success" : "neutral"}">${session.sessionId === snapshot?.lastSummary?.sessionId ? "latest" : "saved"}</span>
+                      </div>
+                      <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
+                      <div class="muted">${escapeHtml(session.summary?.headline || "No summary headline")}</div>
+                    </button>
+                    <button class="secondary review-session-delete" data-delete-review-session-id="${escapeHtml(session.sessionId)}">Delete</button>
+                  </div>
                 `).join("")
               : sessionsState.items.length
-                ? '<div class="section-empty">No saved calls match the current filters.</div>'
-                : `<div class="section-empty">${escapeHtml(sessionsState.note || "No saved calls yet. Finish one call and it will appear here.")}</div>`;
+                ? '<div class="section-empty">No saved meetings match the current filters.</div>'
+                : `<div class="section-empty">${escapeHtml(sessionsState.note || "No saved meetings yet. Finish one meeting and it will appear here.")}</div>`;
 
         reviewSessionListEl.innerHTML = `
           <div class="review-panel">
             <div>
-              <h3>Saved Transcriptions</h3>
-              <p class="muted">Review completed call transcripts captured by Listen.</p>
+              <h3>Saved Meetings</h3>
+              <p class="muted">Review completed meeting transcripts captured by Listen.</p>
             </div>
             ${sessionMarkup}
           </div>
@@ -4824,6 +4889,12 @@
         document.querySelectorAll("[data-review-session-id]").forEach((button) => {
           button.addEventListener("click", async () => {
             await selectReviewSession(button.getAttribute("data-review-session-id"), { preserveQuestion: false });
+          });
+        });
+
+        document.querySelectorAll("[data-delete-review-session-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await deleteReviewSession(button.getAttribute("data-delete-review-session-id"));
           });
         });
 
@@ -4837,8 +4908,8 @@
           reviewSessionDetailEl.innerHTML = `
             <div>
               <div class="eyebrow">Review</div>
-              <h2 class="review-empty-title">No transcription selected</h2>
-              <p class="muted">Choose a saved call from the left to inspect its transcript, summary, and coaching history.</p>
+              <h2 class="review-empty-title">No meeting selected</h2>
+              <p class="muted">Choose a saved meeting from the left to inspect its transcript, summary, and coaching history.</p>
             </div>
           `;
           return;
@@ -4862,14 +4933,19 @@
         reviewSessionDetailEl.innerHTML = `
           <div class="review-session-header">
             <div>
-              <div class="eyebrow">Selected Call</div>
+              <div class="eyebrow">Selected Meeting</div>
               <h2>${escapeHtml(selectedSession.meetingTitle)}</h2>
-              <p class="muted">${escapeHtml(summary?.headline || "Saved Listen session")}</p>
+              <p class="muted">${escapeHtml(summary?.headline || "Saved meeting")}</p>
             </div>
-            <div class="page-chip-row">
-              <span class="page-chip">Completed ${escapeHtml(formatDate(selectedSession.completedAt))}</span>
-              <span class="page-chip">${escapeHtml(selectedSession.meetingProvider.replaceAll("_", " "))}</span>
-              <span class="page-chip">${escapeHtml(selectedSession.stopReason.replaceAll("_", " "))}</span>
+            <div class="review-session-header-actions">
+              <div class="page-chip-row">
+                <span class="page-chip">Completed ${escapeHtml(formatDate(selectedSession.completedAt))}</span>
+                <span class="page-chip">${escapeHtml(selectedSession.meetingProvider.replaceAll("_", " "))}</span>
+                <span class="page-chip">${escapeHtml(selectedSession.stopReason.replaceAll("_", " "))}</span>
+              </div>
+              <div class="meeting-actions">
+                <button class="secondary" data-delete-selected-review-session-id="${escapeHtml(selectedSession.sessionId)}">Delete This Call</button>
+              </div>
             </div>
           </div>
           <div class="stats-grid">
@@ -4931,7 +5007,7 @@
               <div class="card-header">
                 <div>
                   <h3>Transcript</h3>
-                  <p class="muted">Review exact phrasing and moments from the saved call.</p>
+                  <p class="muted">Review exact phrasing and moments from the saved meeting.</p>
                 </div>
               </div>
               ${detailState?.status === "loading" && !detail
@@ -4942,6 +5018,11 @@
             </div>
           </div>
         `;
+
+        const deleteSelectedReviewSessionButton = reviewSessionDetailEl.querySelector("[data-delete-selected-review-session-id]");
+        deleteSelectedReviewSessionButton?.addEventListener("click", async () => {
+          await deleteReviewSession(deleteSelectedReviewSessionButton.getAttribute("data-delete-selected-review-session-id"));
+        });
       }
 
       function renderSessionQaPanel(targetEl, snapshot, options = {}) {
@@ -4960,7 +5041,7 @@
           targetEl.innerHTML = panelKey === "active"
             ? ""
             : `
-              <p class="muted">${panelKey === "prep" ? "Choose a meeting to ask across the brief, research, email history, prior sessions, and saved transcript documents." : "Choose a saved call or document to ask about its stored context."}</p>
+              <p class="muted">${panelKey === "prep" ? "Choose a meeting to ask across the brief, research, email history, prior meetings, and saved transcript documents." : "Choose a saved meeting or document to ask about its stored context."}</p>
               <div id="session-qa-thread-${elementKey}" class="qa-thread-shell">
                 <div class="qa-message assistant">
                   <div class="meta-line">Listen</div>
@@ -4974,10 +5055,10 @@
         const guidance = panelKey === "active"
           ? ""
           : panelKey === "prep"
-            ? "Ask about this meeting using the brief, research, email history, prior Listen sessions, Drive transcripts, and org context we already have."
+            ? "Ask about this meeting using the brief, research, email history, prior meetings, Drive transcripts, and org context we already have."
             : selectedReviewSession
               ? `Ask about ${selectedReviewSession.meetingTitle} using its stored transcript, coaching, and meeting context.`
-                : "Select a saved call first so there is session context to query.";
+                : "Select a saved meeting first so there is session context to query.";
 
         const historyMarkup = qaState.history.length
           ? qaState.history

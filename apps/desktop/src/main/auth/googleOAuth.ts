@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import type { StoredOAuthToken } from "../storage/sessionStore";
 import { fetchWithTimeout } from "../http/fetchWithTimeout";
@@ -19,16 +19,18 @@ export class GoogleOAuthClient {
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
 
   isConfigured(): boolean {
-    return Boolean(this.clientId && this.clientSecret);
+    return Boolean(this.clientId);
   }
 
   getRedirectUri(port: number): string {
     return `http://127.0.0.1:${port}/oauth/google/callback`;
   }
 
-  createAuthorizationRequest(port: number): { url: string; state: string } {
+  createAuthorizationRequest(port: number): { url: string; state: string; codeVerifier: string } {
     const state = randomUUID();
     const redirectUri = this.getRedirectUri(port);
+    const codeVerifier = randomBytes(64).toString("base64url");
+    const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", this.clientId);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -43,18 +45,23 @@ export class GoogleOAuthClient {
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent");
     url.searchParams.set("state", state);
-    return { url: url.toString(), state };
+    url.searchParams.set("code_challenge", codeChallenge);
+    url.searchParams.set("code_challenge_method", "S256");
+    return { url: url.toString(), state, codeVerifier };
   }
 
-  async exchangeCode(code: string, port: number): Promise<StoredOAuthToken> {
+  async exchangeCode(code: string, port: number, codeVerifier: string): Promise<StoredOAuthToken> {
     const redirectUri = this.getRedirectUri(port);
     const body = new URLSearchParams({
       code,
       client_id: this.clientId,
-      client_secret: this.clientSecret,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
+      code_verifier: codeVerifier,
     });
+    if (this.clientSecret) {
+      body.set("client_secret", this.clientSecret);
+    }
     const response = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -78,10 +85,12 @@ export class GoogleOAuthClient {
   async refreshAccessToken(refreshToken: string): Promise<StoredOAuthToken> {
     const body = new URLSearchParams({
       client_id: this.clientId,
-      client_secret: this.clientSecret,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     });
+    if (this.clientSecret) {
+      body.set("client_secret", this.clientSecret);
+    }
     const response = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

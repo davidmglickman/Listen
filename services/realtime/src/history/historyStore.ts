@@ -201,6 +201,26 @@ export class HistoryStore {
     };
   }
 
+  deleteSession(sessionId: string): boolean {
+    const existing = this.database
+      .prepare(
+        `
+          SELECT session_id
+          FROM sessions
+          WHERE session_id = ?
+        `,
+      )
+      .get(sessionId) as { session_id: string } | undefined;
+    if (!existing) {
+      return false;
+    }
+
+    this.database.prepare("DELETE FROM transcript_segments WHERE session_id = ?").run(sessionId);
+    this.database.prepare("DELETE FROM coaching_prompts WHERE session_id = ?").run(sessionId);
+    this.database.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
+    return true;
+  }
+
   listCoachingProfiles(): CoachingProfile[] {
     return this.database
       .prepare(

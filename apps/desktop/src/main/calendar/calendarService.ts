@@ -86,7 +86,7 @@ export class CalendarService {
           throw new Error("Google OAuth state mismatch.");
         }
 
-        this.auth.google = await this.googleOAuthClient.exchangeCode(response.code, OAUTH_PORT);
+        this.auth.google = await this.googleOAuthClient.exchangeCode(response.code, OAUTH_PORT, request.codeVerifier);
       } catch (error) {
         throw this.buildConnectError("google", error);
       }

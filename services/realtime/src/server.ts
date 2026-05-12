@@ -227,6 +227,15 @@ app.get("/api/sessions/:sessionId", (request: Request, response: Response) => {
 
   response.json(session);
 });
+app.delete("/api/sessions/:sessionId", (request: Request, response: Response) => {
+  const deleted = historyStore.deleteSession(getRouteParam(request.params.sessionId));
+  if (!deleted) {
+    response.status(404).json({ error: "Session not found." });
+    return;
+  }
+
+  response.status(204).end();
+});
 app.post("/api/sessions/:sessionId/questions", async (request: Request, response: Response) => {
   if (typeof request.body?.question !== "string" || !request.body.question.trim()) {
     response.status(400).json({ error: "Question is required." });

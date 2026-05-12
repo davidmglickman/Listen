@@ -1378,6 +1378,16 @@ async function readDesktopSessionDetail(sessionId: string): Promise<SessionHisto
   return response.json() as Promise<SessionHistoryDetail>;
 }
 
+async function deleteDesktopSession(sessionId: string): Promise<void> {
+  const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to delete session: ${response.status} ${body}`.trim());
+  }
+}
+
 async function readDesktopMeetingBrief(meetingId: string): Promise<MeetingContext | null> {
   return sessionStore.readMeetingContext(meetingId);
 }
@@ -2223,6 +2233,7 @@ function registerHandlers(): void {
   ipcMain.handle("context:ask-question", async (_event, payload: ContextQuestionPayload) => askDesktopContextQuestion(payload));
   ipcMain.handle("session:list", async (_event, limit?: number) => listDesktopSessions(limit));
   ipcMain.handle("session:get", async (_event, sessionId: string) => readDesktopSessionDetail(sessionId));
+  ipcMain.handle("session:delete", async (_event, sessionId: string) => deleteDesktopSession(sessionId));
   ipcMain.handle("calendar:refresh", async () => refreshCalendars());
   ipcMain.handle("meeting:brief:get", async (_event, meetingId: string) => readDesktopMeetingBrief(meetingId));
   ipcMain.handle("meeting:brief:save", async (_event, meetingId: string, context: MeetingContext) => saveDesktopMeetingBrief(meetingId, context));
