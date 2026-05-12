@@ -1928,11 +1928,11 @@
               <div class="eyebrow">Review</div>
               <h2>Past Meetings</h2>
               <p class="muted">Browse past meetings, inspect the transcript and coaching detail, and ask follow-up questions against any saved meeting.</p>
-              <div class="page-chip-row">
-                <span class="page-chip">History</span>
-                <span class="page-chip">Transcript</span>
-                <span class="page-chip">Coaching</span>
-                <span class="page-chip">Q&A</span>
+              <div class="workspace-tabs">
+                <button class="workspace-tab active" data-review-tab="history">History</button>
+                <button class="workspace-tab" data-review-tab="transcript">Transcript</button>
+                <button class="workspace-tab" data-review-tab="coaching">Coaching</button>
+                <button class="workspace-tab" data-review-tab="qa">Q&A</button>
               </div>
             </div>
             <div class="review-layout">
@@ -1968,13 +1968,23 @@
                 <div id="review-session-list" class="review-session-list"></div>
               </div>
               <div class="review-detail-stack">
-                <div id="review-session-detail" class="card review-focus-card"></div>
-                <div class="card review-qa-card">
-                  <div>
-                    <h2>Ask About This Meeting</h2>
-                    <p class="muted">Query the selected saved meeting using its transcript, coaching trail, and stored meeting context.</p>
+                <div id="review-panel-history" class="workspace-panel active">
+                  <div id="review-session-detail" class="card review-focus-card"></div>
+                </div>
+                <div id="review-panel-transcript" class="workspace-panel">
+                  <div id="review-transcript-detail" class="card review-panel research-section"></div>
+                </div>
+                <div id="review-panel-coaching" class="workspace-panel">
+                  <div id="review-coaching-detail" class="card review-panel research-section"></div>
+                </div>
+                <div id="review-panel-qa" class="workspace-panel">
+                  <div class="card review-qa-card">
+                    <div>
+                      <h2>Ask About This Meeting</h2>
+                      <p class="muted">Query the selected saved meeting using its transcript, coaching trail, and stored meeting context.</p>
+                    </div>
+                    <div id="session-qa"></div>
                   </div>
-                  <div id="session-qa"></div>
                 </div>
               </div>
             </div>
@@ -2121,10 +2131,6 @@
                       <input id="meeting-template-type" placeholder="discovery meeting" />
                     </label>
                     <label>
-                      Meeting goal
-                      <input id="meeting-template-goal" placeholder="book discovery" />
-                    </label>
-                    <label>
                       User role
                       <input id="meeting-template-user-role" placeholder="AE" />
                     </label>
@@ -2133,7 +2139,7 @@
                       <input id="meeting-template-guest-role" placeholder="prospect" />
                     </label>
                     <label>
-                      Desired outcome
+                      Outcome
                       <textarea id="meeting-template-outcome" rows="3" placeholder="Leave with a scheduled next step."></textarea>
                     </label>
                     <label>
@@ -2204,6 +2210,7 @@
         },
         activeCallDetailsExpanded: false,
         prepTab: "brief",
+        reviewTab: "history",
         setupTab: "connections",
         selectedMeetingId: null,
         meetingModalOpen: false,
@@ -2273,7 +2280,8 @@
       const runtimeTranscriptionApiKeyEl = document.getElementById("runtime-transcription-api-key");
       const saveRuntimeSecretsButtonEl = document.getElementById("save-runtime-secrets");
       const navButtons = Array.from(document.querySelectorAll("[data-page].nav-button"));
-  const prepTabButtons = Array.from(document.querySelectorAll("[data-prep-tab]"));
+    const prepTabButtons = Array.from(document.querySelectorAll("[data-prep-tab]"));
+      const reviewTabButtons = Array.from(document.querySelectorAll("[data-review-tab]"));
       const setupTabButtons = Array.from(document.querySelectorAll("[data-setup-tab]"));
       const pages = Array.from(document.querySelectorAll(".page"));
       const meetingsEl = document.getElementById("meetings");
@@ -2298,6 +2306,8 @@
       const sessionQaEl = document.getElementById("session-qa");
       const reviewSessionListEl = document.getElementById("review-session-list");
       const reviewSessionDetailEl = document.getElementById("review-session-detail");
+      const reviewTranscriptDetailEl = document.getElementById("review-transcript-detail");
+      const reviewCoachingDetailEl = document.getElementById("review-coaching-detail");
       const reviewSearchQueryEl = document.getElementById("review-search-query");
       const reviewSearchFunctionEl = document.getElementById("review-search-function");
       const reviewSearchDateEl = document.getElementById("review-search-date");
@@ -2327,7 +2337,6 @@
       const meetingTemplateTitleEl = document.getElementById("meeting-template-title");
       const meetingTemplateFunctionEl = document.getElementById("meeting-template-function");
       const meetingTemplateTypeEl = document.getElementById("meeting-template-type");
-      const meetingTemplateGoalEl = document.getElementById("meeting-template-goal");
       const meetingTemplateUserRoleEl = document.getElementById("meeting-template-user-role");
       const meetingTemplateGuestRoleEl = document.getElementById("meeting-template-guest-role");
       const meetingTemplateOutcomeEl = document.getElementById("meeting-template-outcome");
@@ -2495,7 +2504,7 @@
         prepTabButtons.forEach((button) => {
           button.classList.toggle("active", button.getAttribute("data-prep-tab") === state.prepTab);
         });
-        document.querySelectorAll(".workspace-panel").forEach((panel) => {
+        document.querySelectorAll("[id^='prep-panel-']").forEach((panel) => {
           panel.classList.toggle("active", panel.id === `prep-panel-${state.prepTab}`);
         });
       }
@@ -2503,6 +2512,20 @@
       function setPrepTab(tab) {
         state.prepTab = tab;
         syncPrepPanels();
+      }
+
+      function syncReviewPanels() {
+        reviewTabButtons.forEach((button) => {
+          button.classList.toggle("active", button.getAttribute("data-review-tab") === state.reviewTab);
+        });
+        document.querySelectorAll("[id^='review-panel-']").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === `review-panel-${state.reviewTab}`);
+        });
+      }
+
+      function setReviewTab(tab) {
+        state.reviewTab = tab;
+        syncReviewPanels();
       }
 
       function syncSetupPanels() {
@@ -3001,13 +3024,14 @@
       }
 
       function buildMeetingTemplateContext() {
+        const outcome = meetingTemplateOutcomeEl.value.trim();
         return {
           callFunction: meetingTemplateFunctionEl.value,
           callType: meetingTemplateTypeEl.value.trim(),
-          callGoal: meetingTemplateGoalEl.value.trim(),
+          callGoal: outcome,
           userRole: meetingTemplateUserRoleEl.value.trim(),
           guestRole: meetingTemplateGuestRoleEl.value.trim(),
-          desiredOutcome: meetingTemplateOutcomeEl.value.trim(),
+          desiredOutcome: outcome,
           notes: meetingTemplateNotesEl.value.trim(),
         };
       }
@@ -3016,7 +3040,6 @@
         state.editingMeetingTemplateId = null;
         meetingTemplateTitleEl.value = "";
         meetingTemplateTypeEl.value = "";
-        meetingTemplateGoalEl.value = "";
         meetingTemplateUserRoleEl.value = "";
         meetingTemplateGuestRoleEl.value = "";
         meetingTemplateOutcomeEl.value = "";
@@ -3031,10 +3054,9 @@
         meetingTemplateTitleEl.value = template.title || "";
         meetingTemplateFunctionEl.value = template.context.callFunction || "sales";
         meetingTemplateTypeEl.value = template.context.callType || "";
-        meetingTemplateGoalEl.value = template.context.callGoal || "";
         meetingTemplateUserRoleEl.value = template.context.userRole || "";
         meetingTemplateGuestRoleEl.value = template.context.guestRole || "";
-        meetingTemplateOutcomeEl.value = template.context.desiredOutcome || "";
+        meetingTemplateOutcomeEl.value = template.context.desiredOutcome || template.context.callGoal || "";
         meetingTemplateNotesEl.value = template.context.notes || "";
         cancelMeetingTemplateEditButtonEl.hidden = false;
         document.getElementById("save-meeting-template").textContent = "Update Template";
@@ -5056,6 +5078,18 @@
         const summary = detail?.summary || selectedSession.summary;
         const context = detail?.context;
         const showHeaderHeadline = !isRedundantMeetingHeadline(selectedSession.meetingTitle, summary?.headline);
+        const sessionMetaMarkup = `
+          <div class="page-chip-row">
+            <span class="page-chip">Completed ${escapeHtml(formatDate(selectedSession.completedAt))}</span>
+            <span class="page-chip">${escapeHtml(selectedSession.meetingProvider.replaceAll("_", " "))}</span>
+            <span class="page-chip">${escapeHtml(selectedSession.stopReason.replaceAll("_", " "))}</span>
+          </div>
+        `;
+        const transcriptMarkup = detailState?.status === "loading" && !detail
+          ? '<div class="section-empty">Loading transcript detail...</div>'
+          : detailState?.status === "error"
+            ? `<div class="section-empty">${escapeHtml(detailState.note || "Transcript detail could not be loaded.")}</div>`
+            : `<div class="section-scroller">${buildTranscriptMarkup(detail?.transcript || [])}</div>`;
         const coachingMarkup = detail?.coaching?.length
           ? `<div class="coaching-list">${detail.coaching.map((prompt) => `
               <div class="coach-item">
@@ -5073,13 +5107,9 @@
               <div class="eyebrow">Selected Meeting</div>
               <h2>${escapeHtml(selectedSession.meetingTitle)}</h2>
               ${showHeaderHeadline ? `<p class="muted">${escapeHtml(summary?.headline || "Saved meeting")}</p>` : ""}
+              ${sessionMetaMarkup}
             </div>
             <div class="review-session-header-actions">
-              <div class="page-chip-row">
-                <span class="page-chip">Completed ${escapeHtml(formatDate(selectedSession.completedAt))}</span>
-                <span class="page-chip">${escapeHtml(selectedSession.meetingProvider.replaceAll("_", " "))}</span>
-                <span class="page-chip">${escapeHtml(selectedSession.stopReason.replaceAll("_", " "))}</span>
-              </div>
               <div class="meeting-actions">
                 <button class="secondary review-delete-button" data-delete-selected-review-session-id="${escapeHtml(selectedSession.sessionId)}">Delete Meeting</button>
               </div>
@@ -5126,34 +5156,34 @@
                 : '<div class="section-empty">No saved notes were stored for this call.</div>'}
             </div>
           </div>
-          <div class="review-detail-grid">
-            <div class="review-panel research-section">
-              <div class="card-header">
-                <div>
-                  <h3>Coaching Timeline</h3>
-                  <p class="muted">What the coach surfaced during the call.</p>
-                </div>
-              </div>
-              ${detailState?.status === "loading" && !detail
-                ? '<div class="section-empty">Loading coaching detail...</div>'
-                : detailState?.status === "error"
-                  ? `<div class="section-empty">${escapeHtml(detailState.note || "Coaching detail could not be loaded.")}</div>`
-                  : `<div class="section-scroller">${coachingMarkup}</div>`}
+        `;
+
+        reviewTranscriptDetailEl.innerHTML = `
+          <div class="card-header">
+            <div>
+              <div class="eyebrow">Selected Meeting</div>
+              <h3>${escapeHtml(selectedSession.meetingTitle)}</h3>
+              <p class="muted">Review exact phrasing and moments from the saved meeting.</p>
             </div>
-            <div class="review-panel research-section">
-              <div class="card-header">
-                <div>
-                  <h3>Transcript</h3>
-                  <p class="muted">Review exact phrasing and moments from the saved meeting.</p>
-                </div>
-              </div>
-              ${detailState?.status === "loading" && !detail
-                ? '<div class="section-empty">Loading transcript detail...</div>'
-                : detailState?.status === "error"
-                  ? `<div class="section-empty">${escapeHtml(detailState.note || "Transcript detail could not be loaded.")}</div>`
-                  : `<div class="section-scroller">${buildTranscriptMarkup(detail?.transcript || [])}</div>`}
-            </div>
+            ${sessionMetaMarkup}
           </div>
+          ${transcriptMarkup}
+        `;
+
+        reviewCoachingDetailEl.innerHTML = `
+          <div class="card-header">
+            <div>
+              <div class="eyebrow">Selected Meeting</div>
+              <h3>${escapeHtml(selectedSession.meetingTitle)}</h3>
+              <p class="muted">What the coach surfaced during the call.</p>
+            </div>
+            ${sessionMetaMarkup}
+          </div>
+          ${detailState?.status === "loading" && !detail
+            ? '<div class="section-empty">Loading coaching detail...</div>'
+            : detailState?.status === "error"
+              ? `<div class="section-empty">${escapeHtml(detailState.note || "Coaching detail could not be loaded.")}</div>`
+              : `<div class="section-scroller">${coachingMarkup}</div>`}
         `;
 
         const deleteSelectedReviewSessionButton = reviewSessionDetailEl.querySelector("[data-delete-selected-review-session-id]");
@@ -5498,6 +5528,11 @@
       prepTabButtons.forEach((button) => {
         button.addEventListener("click", () => {
           setPrepTab(button.getAttribute("data-prep-tab"));
+        });
+      });
+      reviewTabButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          setReviewTab(button.getAttribute("data-review-tab"));
         });
       });
       setupTabButtons.forEach((button) => {
