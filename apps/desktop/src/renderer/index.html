@@ -3211,6 +3211,36 @@
         return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
       }
 
+      function extractUserMeetingNotes(value) {
+        const raw = String(value || "").trim();
+        if (!raw) {
+          return "";
+        }
+
+        const generatedHeaders = [
+          "Meeting overview:\n",
+          "Research summary:\n",
+          "Guest email history:\n",
+          "Related prior meetings:\n",
+          "Google Drive transcripts:\n",
+        ];
+        const userNotesPrefix = "Your meeting notes:\n";
+
+        if (!raw.startsWith(userNotesPrefix)) {
+          return generatedHeaders.some((header) => raw.includes(header)) ? "" : raw;
+        }
+
+        let notes = raw.slice(userNotesPrefix.length).trim();
+        for (const header of generatedHeaders) {
+          const index = notes.indexOf(`\n\n${header}`);
+          if (index >= 0) {
+            notes = notes.slice(0, index).trim();
+          }
+        }
+
+        return notes;
+      }
+
       function buildMeetingOverviewContextBlock(meeting, baseContext) {
         if (!meeting) {
           return "";
@@ -3413,8 +3443,9 @@
         return null;
       }
 
-      function buildMeetingLaunchContextCacheKey(meeting, baseContext, emailHistory, sessionHistory) {
+      function buildMeetingLaunchContextCacheKey(meeting, baseContext) {
         return JSON.stringify({
+          version: 2,
           meeting: meeting
             ? {
                 id: meeting.id,
@@ -3423,8 +3454,6 @@
                 startsAt: meeting.startsAt || "",
                 endsAt: meeting.endsAt || "",
                 notes: meeting.notes || "",
-                researchUpdatedAt: meeting.research?.updatedAt || "",
-                researchStatus: meeting.research?.status || "",
               }
             : null,
           brief: {
@@ -3436,32 +3465,6 @@
             desiredOutcome: baseContext?.desiredOutcome || "",
             notes: baseContext?.notes || "",
           },
-          emailHistory: emailHistory
-            ? {
-                status: emailHistory.status,
-                note: emailHistory.note,
-                messages: (emailHistory.messages || []).map((message) => ({
-                  id: message.id,
-                  from: message.from,
-                  subject: message.subject,
-                  date: message.date,
-                  snippet: message.snippet,
-                })),
-              }
-            : null,
-          sessionHistory: sessionHistory
-            ? {
-                status: sessionHistory.status,
-                note: sessionHistory.note,
-                sessions: (sessionHistory.sessions || []).map((session) => ({
-                  sessionId: session.sessionId,
-                  meetingTitle: session.meetingTitle,
-                  completedAt: session.completedAt,
-                  headline: session.headline,
-                  matchReason: session.matchReason,
-                })),
-              }
-            : null,
         });
       }
 
@@ -3472,12 +3475,7 @@
           notes: (baseContext?.notes || "").trim(),
         };
 
-        const [emailHistory, sessionHistory] = await Promise.all([
-          loadMeetingEmailHistory(meetingId),
-          loadMeetingSessionHistory(meetingId),
-        ]);
-
-        const cacheKey = buildMeetingLaunchContextCacheKey(meeting, context, emailHistory, sessionHistory);
+        const cacheKey = buildMeetingLaunchContextCacheKey(meeting, context);
         const cachedLaunchContext = state.meetingLaunchContexts[meetingId]
           || await window.listenBridge.getMeetingLaunchContext(meetingId);
 
@@ -3486,10 +3484,8 @@
           return cachedLaunchContext.context;
         }
 
-        const combinedNotes = buildCombinedMeetingContextNotes(meeting, context, emailHistory, sessionHistory);
         const launchContext = {
           ...context,
-          notes: combinedNotes,
         };
         const launchContextPayload = {
           cacheKey,
@@ -5010,8 +5006,8 @@
             </div>
             <div class="review-summary-section">
               <h3>Saved Notes</h3>
-              ${context?.notes
-                ? `<div class="review-bullet-list"><div class="review-bullet-item">${escapeHtml(context.notes)}</div></div>`
+              ${extractUserMeetingNotes(context?.notes)
+                ? `<div class="review-bullet-list"><div class="review-bullet-item">${escapeHtml(extractUserMeetingNotes(context?.notes))}</div></div>`
                 : '<div class="section-empty">No saved notes were stored for this call.</div>'}
             </div>
           </div>
