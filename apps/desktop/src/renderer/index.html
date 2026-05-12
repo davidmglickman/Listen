@@ -3061,6 +3061,11 @@
         const hasOrgDocs = state.orgDocuments.length > 0;
         const hasTemplates = state.meetingTemplates.length > 0;
         const hasApiKeys = state.runtimeCapabilities.aiConfigured && state.runtimeCapabilities.cloudTranscriptionConfigured;
+        const apiKeyDetail = hasApiKeys
+          ? "Both API keys are saved for this user."
+          : state.runtimeCapabilities.cloudTranscriptionConfigured
+            ? "AI key is missing. Save it in Setup so summaries and coaching work in packaged builds."
+            : "Transcription key is missing. Without it, Listen only transcribes your local microphone. Save your transcription key in Setup.";
         setupOverviewEl.innerHTML = [
           {
             title: "Connect calendar",
@@ -3069,7 +3074,7 @@
           },
           {
             title: "Add AI and transcription keys",
-            detail: hasApiKeys ? "Both API keys are saved for this user." : "Enter your own AI and transcription keys so packaged builds never ship shared secrets.",
+            detail: apiKeyDetail,
             complete: hasApiKeys,
           },
           {
@@ -4262,6 +4267,7 @@
           const micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
           await startRecorderForStream("microphone", micStream, captureState.microphone);
           if (!state.runtimeCapabilities.cloudTranscriptionConfigured) {
+            setStatusBanner("info", "Transcription key is missing, so this session will only transcribe your microphone until you save it in Setup.");
             await startSpeechFallbackForSession(snapshot.activeSession.id);
           } else {
             scheduleSpeechFallbackActivation(snapshot.activeSession.id);
@@ -4280,11 +4286,11 @@
           setCaptureStatus(`${previous}System audio capture failed: ${error instanceof Error ? error.message : error}`.trim());
         }
 
-        if ((captureState.system && captureState.system.recorder) || (captureState.microphone && captureState.microphone.recorder)) {
+        if ((captureState.system && captureState.system.processor) || (captureState.microphone && captureState.microphone.processor)) {
           setCaptureStatus(
             state.runtimeCapabilities.cloudTranscriptionConfigured
               ? "Audio capture is active."
-              : "Audio capture is active. Using local microphone transcription fallback.",
+              : "Audio capture is active. Only your microphone will be transcribed until you save a transcription key in Setup.",
           );
         }
       }
@@ -4341,7 +4347,45 @@
         });
       }
 
+      function captureInlinePrepFocusState() {
+        const activeElement = document.activeElement;
+        if (!(activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLSelectElement)) {
+          return null;
+        }
+
+        if (!activeElement.closest(".meeting-inline-prep")) {
+          return null;
+        }
+
+        return {
+          id: activeElement.id,
+          selectionStart: "selectionStart" in activeElement ? activeElement.selectionStart : null,
+          selectionEnd: "selectionEnd" in activeElement ? activeElement.selectionEnd : null,
+        };
+      }
+
+      function restoreInlinePrepFocusState(focusState) {
+        if (!focusState?.id) {
+          return;
+        }
+
+        const nextElement = document.getElementById(focusState.id);
+        if (!(nextElement instanceof HTMLInputElement || nextElement instanceof HTMLTextAreaElement || nextElement instanceof HTMLSelectElement)) {
+          return;
+        }
+
+        nextElement.focus();
+        if (
+          typeof focusState.selectionStart === "number"
+          && typeof focusState.selectionEnd === "number"
+          && "setSelectionRange" in nextElement
+        ) {
+          nextElement.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
+        }
+      }
+
       function renderMeetings(snapshot) {
+        const inlinePrepFocusState = captureInlinePrepFocusState();
         if (!snapshot.upcomingMeetings.length) {
           meetingsEl.innerHTML = '<div class="section-empty">No meetings yet. Finish Setup or refresh your calendar connections to load upcoming calls.</div>';
           return;
@@ -4447,6 +4491,7 @@
         });
 
         renderInlineMeetingPrep(snapshot);
+        restoreInlinePrepFocusState(inlinePrepFocusState);
       }
 
       function renderInlineMeetingPrep(snapshot) {

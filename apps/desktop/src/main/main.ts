@@ -605,7 +605,7 @@ async function confirmAutomaticSessionEnd(reason: SessionStopReason): Promise<bo
   const dialogOptions: MessageBoxOptions = {
     type: "question",
     buttons: ["End session", "Keep session running"],
-    defaultId: 0,
+    defaultId: 1,
     cancelId: 1,
     noLink: true,
     title: "End Listen session?",
