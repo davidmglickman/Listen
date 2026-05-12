@@ -6,10 +6,34 @@ import type {
   CoachingPrompt,
   MeetingContext,
   MeetingRecord,
+  SessionHistoryDetail,
+  SessionHistoryItem,
   SessionStopReason,
   SessionSummary,
   TranscriptSegment,
 } from "@listen/shared";
+
+interface SessionRow {
+  session_id: string;
+  meeting_id: string;
+  meeting_title: string;
+  meeting_provider: SessionHistoryItem["meetingProvider"];
+  calendar_provider: SessionHistoryItem["calendarProvider"];
+  started_at: string;
+  expected_end_at: string;
+  completed_at: string;
+  stop_reason: SessionHistoryItem["stopReason"];
+  summary_json: string;
+  context_json: string | null;
+}
+
+function parseJson<T>(value: string | null): T | null {
+  if (!value) {
+    return null;
+  }
+
+  return JSON.parse(value) as T;
+}
 
 export interface StoredOAuthToken {
   accessToken: string;
@@ -264,6 +288,89 @@ export class SessionStore {
     }
   }
 
+  async listSessions(limit = 50): Promise<SessionHistoryItem[]> {
+    const rows = this.database
+      .prepare(
+        `
+          SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json
+          FROM sessions
+          ORDER BY completed_at DESC
+          LIMIT ?
+        `,
+      )
+      .all(limit) as unknown as SessionRow[];
+
+    return rows.map((row) => this.mapSessionRow(row));
+  }
+
+  async getSession(sessionId: string): Promise<SessionHistoryDetail | null> {
+    const row = this.database
+      .prepare(
+        `
+          SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json
+          FROM sessions
+          WHERE session_id = ?
+        `,
+      )
+      .get(sessionId) as SessionRow | undefined;
+    if (!row) {
+      return null;
+    }
+
+    const session = this.mapSessionRow(row);
+    const transcript = this.database
+      .prepare(
+        `
+          SELECT id, session_id as sessionId, source, speaker_id as speakerId, speaker_label as speakerLabel, text, is_final as isFinal, created_at as createdAt
+          FROM transcript_segments
+          WHERE session_id = ?
+          ORDER BY created_at ASC
+        `,
+      )
+      .all(sessionId)
+      .map((segment) => ({
+        ...segment,
+        isFinal: Boolean((segment as { isFinal: number }).isFinal),
+      })) as SessionHistoryDetail["transcript"];
+
+    const coaching = this.database
+      .prepare(
+        `
+          SELECT id, session_id as sessionId, speaker_id as speakerId, speaker_label as speakerLabel, severity, title, message, created_at as createdAt
+          FROM coaching_prompts
+          WHERE session_id = ?
+          ORDER BY created_at DESC
+        `,
+      )
+      .all(sessionId) as unknown as SessionHistoryDetail["coaching"];
+
+    return {
+      ...session,
+      transcript,
+      coaching,
+    };
+  }
+
+  async deleteSession(sessionId: string): Promise<boolean> {
+    const existing = this.database
+      .prepare(
+        `
+          SELECT session_id
+          FROM sessions
+          WHERE session_id = ?
+        `,
+      )
+      .get(sessionId) as { session_id: string } | undefined;
+    if (!existing) {
+      return false;
+    }
+
+    this.database.prepare("DELETE FROM transcript_segments WHERE session_id = ?").run(sessionId);
+    this.database.prepare("DELETE FROM coaching_prompts WHERE session_id = ?").run(sessionId);
+    this.database.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
+    return true;
+  }
+
   private readSetting<T>(key: string): T | null {
     const row = this.database.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
     if (!row) {
@@ -287,5 +394,21 @@ export class SessionStore {
     }
 
     this.database.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+
+  private mapSessionRow(row: SessionRow): SessionHistoryItem {
+    return {
+      sessionId: row.session_id,
+      meetingId: row.meeting_id,
+      meetingTitle: row.meeting_title,
+      meetingProvider: row.meeting_provider,
+      calendarProvider: row.calendar_provider,
+      startedAt: row.started_at,
+      expectedEndAt: row.expected_end_at,
+      completedAt: row.completed_at,
+      stopReason: row.stop_reason,
+      summary: JSON.parse(row.summary_json) as SessionSummary,
+      context: parseJson<MeetingContext>(row.context_json),
+    };
   }
 }

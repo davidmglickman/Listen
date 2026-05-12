@@ -1355,36 +1355,22 @@ async function askDesktopContextQuestion(payload: ContextQuestionPayload): Promi
 }
 
 async function listDesktopSessions(limit = 20): Promise<SessionHistoryItem[]> {
-  const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/sessions?limit=${encodeURIComponent(String(limit))}`);
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to load session history: ${response.status} ${body}`.trim());
-  }
-
-  const payload = (await response.json()) as {
-    sessions?: SessionHistoryItem[];
-  };
-
-  return payload.sessions ?? [];
+  return sessionStore.listSessions(limit);
 }
 
 async function readDesktopSessionDetail(sessionId: string): Promise<SessionHistoryDetail> {
-  const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/sessions/${encodeURIComponent(sessionId)}`);
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to load session detail: ${response.status} ${body}`.trim());
+  const session = await sessionStore.getSession(sessionId);
+  if (!session) {
+    throw new Error("Failed to load session detail: session not found.");
   }
 
-  return response.json() as Promise<SessionHistoryDetail>;
+  return session;
 }
 
 async function deleteDesktopSession(sessionId: string): Promise<void> {
-  const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/sessions/${encodeURIComponent(sessionId)}`, {
-    method: "DELETE",
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to delete session: ${response.status} ${body}`.trim());
+  const deleted = await sessionStore.deleteSession(sessionId);
+  if (!deleted) {
+    throw new Error("Failed to delete session: session not found.");
   }
 }
 
