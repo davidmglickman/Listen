@@ -70,7 +70,7 @@ export class GoogleCalendarProvider {
       return {
         provider: "google",
         connected: false,
-        accountLabel: "Google not connected",
+        accountLabel: "Connect once for calendar sync, Gmail history, and Drive transcript search.",
       };
     }
 

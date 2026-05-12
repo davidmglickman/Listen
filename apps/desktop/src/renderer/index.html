@@ -1909,7 +1909,7 @@
                 <div id="setup-panel-connections" class="workspace-panel active">
                   <div>
                     <h3>Calendar Connections</h3>
-                    <p class="muted">Connect calendars once, then mostly return to the Meetings page.</p>
+                    <p class="muted">Connect Google for calendar, Gmail, and Drive access, or connect Microsoft to sync calendars once and return to Meetings.</p>
                   </div>
                   <div id="connections" class="stack"></div>
                   <div class="card stack">
@@ -4242,13 +4242,29 @@
           button.addEventListener("click", async () => {
             const provider = button.getAttribute("data-provider");
             const action = button.getAttribute("data-calendar-action");
-            const snapshot = await runUiAction(
-              `${action === "connect" ? "Connecting" : "Disconnecting"} ${provider} calendar...`,
-              () => action === "connect"
-                ? window.listenBridge.connectCalendar(provider)
-                : window.listenBridge.disconnectCalendar(provider),
-            );
-            await render(snapshot);
+            if (!provider || !action) {
+              return;
+            }
+
+            button.disabled = true;
+            try {
+              const actionMessage = action === "connect"
+                ? provider === "google"
+                  ? "Opening Google sign-in for calendar, Gmail, and Drive access..."
+                  : `Opening ${provider} sign-in for calendar access...`
+                : `Disconnecting ${provider} calendar...`;
+              const snapshot = await runUiAction(
+                actionMessage,
+                () => action === "connect"
+                  ? window.listenBridge.connectCalendar(provider)
+                  : window.listenBridge.disconnectCalendar(provider),
+              );
+              await render(snapshot);
+            } catch {
+              // runUiAction already surfaces the error in the status banner.
+            } finally {
+              button.disabled = false;
+            }
           });
         });
       }

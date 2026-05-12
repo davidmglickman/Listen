@@ -56,6 +56,16 @@ export class CalendarService {
     return [...this.providerMeetings, ...this.mockMeetings].sort((left, right) => left.startsAt.localeCompare(right.startsAt));
   }
 
+  private buildConnectError(provider: "google" | "microsoft", error: unknown): Error {
+    const label = provider === "google" ? "Google" : "Microsoft";
+    const message = error instanceof Error ? error.message : String(error);
+    if (/timed out/i.test(message)) {
+      return new Error(`${label} sign-in timed out. Finish the browser prompt and try again.`);
+    }
+
+    return new Error(`${label} sign-in failed: ${message}`);
+  }
+
   async getAccessToken(provider: "google" | "microsoft"): Promise<string | null> {
     const token = await this.ensureActiveToken(provider);
     return token?.accessToken ?? null;
@@ -69,13 +79,18 @@ export class CalendarService {
 
       const request = this.googleOAuthClient.createAuthorizationRequest(OAUTH_PORT);
       const callbackPromise = awaitOAuthCode(OAUTH_PORT, "/oauth/google/callback", OAUTH_TIMEOUT_MS);
-      await this.openExternal(request.url);
-      const response = await callbackPromise;
-      if (response.state !== request.state) {
-        throw new Error("Google OAuth state mismatch.");
+      try {
+        await this.openExternal(request.url);
+        const response = await callbackPromise;
+        if (response.state !== request.state) {
+          throw new Error("Google OAuth state mismatch.");
+        }
+
+        this.auth.google = await this.googleOAuthClient.exchangeCode(response.code, OAUTH_PORT);
+      } catch (error) {
+        throw this.buildConnectError("google", error);
       }
 
-      this.auth.google = await this.googleOAuthClient.exchangeCode(response.code, OAUTH_PORT);
       await this.sessionStore.writeAuthToken("google", this.auth.google);
       this.connections = this.buildConnections();
       return;
@@ -87,13 +102,18 @@ export class CalendarService {
 
     const request = this.microsoftOAuthClient.createAuthorizationRequest(OAUTH_PORT);
     const callbackPromise = awaitOAuthCode(OAUTH_PORT, "/oauth/microsoft/callback", OAUTH_TIMEOUT_MS);
-    await this.openExternal(request.url);
-    const response = await callbackPromise;
-    if (response.state !== request.state) {
-      throw new Error("Microsoft OAuth state mismatch.");
+    try {
+      await this.openExternal(request.url);
+      const response = await callbackPromise;
+      if (response.state !== request.state) {
+        throw new Error("Microsoft OAuth state mismatch.");
+      }
+
+      this.auth.microsoft = await this.microsoftOAuthClient.exchangeCode(response.code, OAUTH_PORT);
+    } catch (error) {
+      throw this.buildConnectError("microsoft", error);
     }
 
-    this.auth.microsoft = await this.microsoftOAuthClient.exchangeCode(response.code, OAUTH_PORT);
     await this.sessionStore.writeAuthToken("microsoft", this.auth.microsoft);
     this.connections = this.buildConnections();
   }
