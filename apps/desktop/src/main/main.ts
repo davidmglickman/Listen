@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
 import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
@@ -199,6 +200,87 @@ function createInitialCaptureHealth() {
 
 function resolveDesktopDatabasePath(): string {
   return process.env.LISTEN_DB_PATH?.trim() || (app.isPackaged ? path.join(app.getPath("userData"), "listen.db") : path.resolve(process.cwd(), "data", "listen.db"));
+}
+
+function migrateLegacyOrgContextDocuments(databasePath: string): void {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  const legacyDatabasePath = path.join(app.getPath("userData"), "data", "listen.db");
+  if (!existsSync(legacyDatabasePath) || legacyDatabasePath === databasePath) {
+    return;
+  }
+
+  const legacyDatabase = new DatabaseSync(legacyDatabasePath);
+  const currentDatabase = new DatabaseSync(databasePath);
+
+  try {
+    const legacyHasOrgContextTable = (legacyDatabase.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get("org_context_documents") as { name?: string } | undefined)?.name;
+    if (!legacyHasOrgContextTable) {
+      return;
+    }
+
+    currentDatabase.exec(`
+      CREATE TABLE IF NOT EXISTS org_context_documents (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        source_url TEXT,
+        source_name TEXT,
+        mime_type TEXT,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    const currentDocumentCount = Number((currentDatabase.prepare("SELECT COUNT(*) as count FROM org_context_documents").get() as { count: number }).count || 0);
+    if (currentDocumentCount > 0) {
+      return;
+    }
+
+    const legacyDocuments = legacyDatabase.prepare(
+      `
+        SELECT id, title, content, source_url as sourceUrl, source_name as sourceName, mime_type as mimeType, updated_at as updatedAt
+        FROM org_context_documents
+        ORDER BY updated_at DESC
+      `,
+    ).all() as unknown as OrgContextDocument[];
+
+    if (!legacyDocuments.length) {
+      return;
+    }
+
+    const insertDocument = currentDatabase.prepare(
+      `
+        INSERT INTO org_context_documents (id, title, content, source_url, source_name, mime_type, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          content = excluded.content,
+          source_url = excluded.source_url,
+          source_name = excluded.source_name,
+          mime_type = excluded.mime_type,
+          updated_at = excluded.updated_at
+      `,
+    );
+
+    for (const document of legacyDocuments) {
+      insertDocument.run(
+        document.id,
+        document.title,
+        document.content,
+        document.sourceUrl ?? null,
+        document.sourceName ?? null,
+        document.mimeType ?? null,
+        document.updatedAt,
+      );
+    }
+
+    console.log(`Migrated ${legacyDocuments.length} legacy org context document(s) from ${legacyDatabasePath} to ${databasePath}.`);
+  } finally {
+    legacyDatabase.close();
+    currentDatabase.close();
+  }
 }
 
 function resolveBundledRealtimeEntry(): string | null {
@@ -2408,6 +2490,7 @@ function createControlWindow(): void {
 app.whenReady().then(async () => {
   configureSessionPermissions();
   const databasePath = resolveDesktopDatabasePath();
+  migrateLegacyOrgContextDocuments(databasePath);
   sessionStore = new SessionStore(databasePath);
   await ensureRealtimeServiceAvailable(databasePath);
   const calendarSyncClient = new CalendarSyncClient(realtimeHttpUrl);
