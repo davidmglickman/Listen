@@ -56,6 +56,16 @@ function buildToneInstruction(settings?: CoachingSettings): string {
   return `${styleInstruction} ${directnessInstruction}`.trim();
 }
 
+function buildEqCommunicationInstruction(): string {
+  return [
+    "Use an EQ-first communication lens.",
+    "Favor coaching that improves trust, empathy, listening, emotional control, and shared outcomes over surface-level speech cleanup.",
+    "Use Seven Habits style communication principles: be proactive, begin with the desired outcome, prioritize what matters, think win-win, seek first to understand before trying to be understood, and create alignment instead of tension.",
+    "Only mention filler words, pacing, or long answers when they are clearly blocking empathy, clarity, or forward motion.",
+    "Prefer advice about curiosity, acknowledgment, reframing, concise ownership, calm tone, and better questions.",
+  ].join(" ");
+}
+
 function applyToneToMessage(message: string, settings?: CoachingSettings): string {
   const normalized = trimSentence(message);
   if (!settings || !normalized) {
@@ -129,48 +139,48 @@ function buildContextAwareMessage(ruleType: CoachingRuleType, meetingContext?: M
   if (ruleType === "filler") {
     if (callFunction === "sales" && callType.includes("discovery")) {
       return {
-        title: "Pause, then ask the next discovery question",
-        message: "Drop the filler and create space. Ask one direct question that uncovers pain, process, or timing.",
+        title: "Slow down and understand the buyer",
+        message: "Pause, show you heard them, and ask one focused question that uncovers pain, process, or timing before you push your point.",
       };
     }
 
     if (callFunction === "sales" && callType.includes("demo")) {
       return {
-        title: "Tighten the demo narration",
-        message: "Lead with the relevant outcome, then show the proof. Avoid filler before the key value statement.",
+        title: "Reconnect to their outcome",
+        message: "Keep the demo anchored on their goal. State the outcome in plain language, then show proof that answers their concern.",
       };
     }
 
     if (callFunction === "recruiting") {
       return {
-        title: "Slow down and get evidence",
-        message: "Pause instead of filling space, then ask for one concrete example that proves the skill you are testing.",
+        title: "Create room for their example",
+        message: "Slow the pace, acknowledge what you heard, and invite one concrete example instead of filling the silence yourself.",
       };
     }
 
     if (callFunction === "partnership") {
       return {
-        title: "Keep the value exchange crisp",
-        message: "Cut the filler and restate the mutual value in one sentence before moving forward.",
+        title: "Recenter on mutual value",
+        message: "Briefly reset and restate the shared win in one sentence so the conversation feels collaborative, not scattered.",
       };
     }
 
     if (callFunction === "internal") {
       return {
-        title: "Deliver the point cleanly",
-        message: "Pause briefly and give the update directly. Internal calls reward clarity more than narration.",
+        title: "Lead with calm clarity",
+        message: "Pause, name the point directly, and keep your tone steady so the room can respond to the substance instead of the delivery.",
       };
     }
   }
 
   const defaultMessage = ruleType === "filler"
     ? {
-        title: "Tighten delivery",
-        message: "Too many filler words in the last response. Pause briefly before the next sentence.",
+        title: "Slow down and reconnect",
+        message: "Take a beat, ground yourself, and respond in a way that shows understanding before moving to your next point.",
       }
     : {
-        title: "Lead with the answer",
-        message: "The last response is running long. Start with the direct answer, then add one detail.",
+        title: "Make space for the other side",
+        message: "Shorten the next response, lead with the core point, and leave room for the other person to react or clarify.",
       };
 
   if (!desiredOutcome) {
@@ -227,7 +237,7 @@ export async function buildCoachMessageWithAi(
           {
             role: "system",
             content:
-              `You decide whether a live coaching nudge is actually worth showing. Respond with strict JSON only containing shouldEmit, title, and message. Set shouldEmit to false when the advice would be obvious, repetitive, weak, or not actionable enough to interrupt the user. Only emit when the coaching is specific and valuable. ${buildToneInstruction(context.settings)}`.trim(),
+              `You decide whether a live coaching nudge is actually worth showing. Respond with strict JSON only containing shouldEmit, title, and message. Set shouldEmit to false when the advice would be obvious, repetitive, weak, or not actionable enough to interrupt the user. Only emit when the coaching is specific and valuable. ${buildEqCommunicationInstruction()} ${buildToneInstruction(context.settings)}`.trim(),
           },
           {
             role: "user",

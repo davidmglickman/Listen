@@ -451,12 +451,26 @@ function configureSessionPermissions(): void {
       return;
     }
 
+    const preferredMeetingSourceId = meetingWindow && !meetingWindow.isDestroyed()
+      ? meetingWindow.getMediaSourceId()
+      : null;
     const sources = await desktopCapturer.getSources({
-      types: ["screen"],
+      types: preferredMeetingSourceId ? ["window", "screen"] : ["screen"],
       thumbnailSize: { width: 0, height: 0 },
     });
+    const preferredSource = preferredMeetingSourceId
+      ? sources.find((source) => source.id === preferredMeetingSourceId)
+      : null;
+    const fallbackSource = sources.find((source) => source.id.startsWith("screen:")) ?? sources[0];
+    const selectedSource = preferredSource ?? fallbackSource;
+
+    if (!selectedSource) {
+      callback({});
+      return;
+    }
+
     callback({
-      video: sources[0],
+      video: selectedSource,
       audio: process.platform === "win32" ? "loopback" : undefined,
     });
   });

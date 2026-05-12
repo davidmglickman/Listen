@@ -766,25 +766,32 @@
 
       .review-session-list {
         display: grid;
-        gap: 10px;
+        gap: 12px;
         max-height: calc(100vh - 240px);
+        min-height: 0;
+      }
+
+      .review-session-items {
+        display: grid;
+        gap: 8px;
+        max-height: calc(100vh - 340px);
         overflow: auto;
         padding-right: 4px;
       }
 
       .review-session-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 120px;
-        gap: 12px;
-        align-items: stretch;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
       }
 
       .review-session-button {
         width: 100%;
         text-align: left;
         display: grid;
-        gap: 8px;
-        padding: 14px 16px;
+        gap: 4px;
+        padding: 10px 12px;
         border-radius: 8px;
         background: var(--surface);
         border: 1px solid var(--border);
@@ -808,11 +815,37 @@
       }
 
       .review-session-delete {
-        align-self: stretch;
+        align-self: center;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding-inline: 12px;
+        padding: 10px 12px;
+        white-space: nowrap;
+      }
+
+      .review-session-title {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .review-session-summary-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .review-session-summary-line .meta-line {
+        white-space: nowrap;
+      }
+
+      .review-session-summary-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .review-detail-stack {
@@ -1578,8 +1611,16 @@
 
         .review-session-list {
           max-height: none;
+        }
+
+        .review-session-items {
+          max-height: none;
           overflow: visible;
           padding-right: 0;
+        }
+
+        .review-session-row {
+          grid-template-columns: minmax(0, 1fr);
         }
 
         .brief-layout,
@@ -4930,13 +4971,15 @@
                   <div class="review-session-row">
                     <button class="review-session-button ${session.sessionId === state.selectedReviewSessionId ? "active" : ""}" data-review-session-id="${escapeHtml(session.sessionId)}">
                       <div class="row-between">
-                        <strong>${escapeHtml(session.meetingTitle)}</strong>
+                        <strong class="review-session-title">${escapeHtml(session.meetingTitle)}</strong>
                         <span class="badge ${session.sessionId === snapshot?.lastSummary?.sessionId ? "success" : "neutral"}">${session.sessionId === snapshot?.lastSummary?.sessionId ? "latest" : "saved"}</span>
                       </div>
-                      <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
-                      <div class="muted">${escapeHtml(session.summary?.headline || "No summary headline")}</div>
+                      <div class="review-session-summary-line">
+                        <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
+                        <div class="muted review-session-summary-text">${escapeHtml(session.summary?.headline || "No summary headline")}</div>
+                      </div>
                     </button>
-                    <button class="secondary review-session-delete review-delete-button" data-delete-review-session-id="${escapeHtml(session.sessionId)}">Delete Meeting</button>
+                    <button class="secondary review-session-delete review-delete-button" data-delete-review-session-id="${escapeHtml(session.sessionId)}">Delete</button>
                   </div>
                 `).join("")
               : sessionsState.items.length
@@ -4947,9 +4990,9 @@
           <div class="review-panel">
             <div>
               <h3>Saved Meetings</h3>
-              <p class="muted">Review completed meeting transcripts captured by Listen.</p>
+              <p class="muted">Completed meetings in a compact history list.</p>
             </div>
-            ${sessionMarkup}
+            <div class="review-session-items">${sessionMarkup}</div>
           </div>
         `;
 
