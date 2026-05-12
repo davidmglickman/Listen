@@ -26,6 +26,10 @@ const config = {
       to: ".",
       filter: ["**/*"],
     },
+    {
+      from: "build/icon.ico",
+      to: "icon.ico",
+    },
   ],
   win: {
     signAndEditExecutable: false,

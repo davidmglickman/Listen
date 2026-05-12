@@ -1207,6 +1207,27 @@
         flex: 1 1 320px;
       }
 
+      .updater-action-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .updater-build-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 36px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
       .updater-status-copy {
         display: inline-flex;
         align-items: center;
@@ -1847,8 +1868,8 @@
                 <div id="review-session-detail" class="card review-focus-card"></div>
                 <div class="card review-qa-card">
                   <div>
-                    <h2>Ask About This Context</h2>
-                    <p class="muted">Query the selected saved call or document using all stored context we have for it.</p>
+                    <h2>Ask About This Call</h2>
+                    <p class="muted">Query the selected saved call using its transcript, coaching trail, and stored meeting context.</p>
                   </div>
                   <div id="session-qa"></div>
                 </div>
@@ -1866,7 +1887,10 @@
                 <div id="setup-overview" class="setup-checklist"></div>
                 <div class="setup-updater-row">
                   <div id="updater-status" class="meta-line"></div>
-                  <button id="check-for-updates" class="secondary">Check for Updates</button>
+                  <div class="updater-action-group">
+                    <div id="updater-current-build" class="updater-build-chip">Build --</div>
+                    <button id="check-for-updates" class="secondary">Check for Updates</button>
+                  </div>
                 </div>
               </div>
               <div class="card settings-tab-card">
@@ -2139,6 +2163,7 @@
       const sidebarToggleEl = document.getElementById("sidebar-toggle");
     const setupOverviewEl = document.getElementById("setup-overview");
     const updaterStatusEl = document.getElementById("updater-status");
+    const updaterCurrentBuildEl = document.getElementById("updater-current-build");
     const checkForUpdatesButtonEl = document.getElementById("check-for-updates");
     const connectionsEl = document.getElementById("connections");
       const runtimeAiApiKeyEl = document.getElementById("runtime-ai-api-key");
@@ -2515,18 +2540,8 @@
 
       async function syncReviewFilterSelection() {
         const filteredItems = getFilteredReviewSessions();
-        const filteredDocuments = getFilteredReviewDocuments();
         const currentVisible = state.selectedReviewSessionId && filteredItems.some((item) => item.sessionId === state.selectedReviewSessionId);
         if (currentVisible) {
-          state.selectedReviewDocumentId = null;
-          renderReviewWorkspace(state.snapshot);
-          renderSessionQa(state.snapshot);
-          return;
-        }
-
-        const currentDocumentVisible = state.selectedReviewDocumentId && filteredDocuments.some((item) => item.id === state.selectedReviewDocumentId);
-        if (currentDocumentVisible) {
-          state.selectedReviewSessionId = null;
           renderReviewWorkspace(state.snapshot);
           renderSessionQa(state.snapshot);
           return;
@@ -2537,7 +2552,7 @@
           return;
         }
 
-        selectReviewDocument(filteredDocuments[0]?.id || null);
+        await selectReviewSession(null, { preserveQuestion: false });
       }
 
       async function loadReviewSessions(options = {}) {
@@ -2566,9 +2581,6 @@
             const preferredSessionId = state.snapshot?.lastSummary?.sessionId;
             const nextSessionId = items.find((item) => item.sessionId === preferredSessionId)?.sessionId || items[0]?.sessionId || null;
             state.selectedReviewSessionId = nextSessionId;
-            if (nextSessionId) {
-              state.selectedReviewDocumentId = null;
-            }
           }
 
           if (state.selectedReviewSessionId) {
@@ -3074,6 +3086,7 @@
           `<span class="updater-status-copy">${isChecking ? '<span class="updater-status-spinner" aria-hidden="true"></span>' : ""}<span>${escapeHtml(state.updater.message)}</span></span>`,
           `${versionLine}${checkedLine}`,
         ].join("<br>");
+        updaterCurrentBuildEl.textContent = `Build ${state.updater.currentVersion || "--"}`;
         checkForUpdatesButtonEl.textContent = getUpdaterActionLabel();
         checkForUpdatesButtonEl.classList.toggle("is-loading", isChecking);
         checkForUpdatesButtonEl.disabled = state.updater.availability === "checking" || state.updater.availability === "downloading";
@@ -3314,23 +3327,7 @@
           };
         }
 
-        const selectedDocument = getSelectedReviewDocument();
-        if (!selectedDocument) {
-          return null;
-        }
-
-        return {
-          title: selectedDocument.title || "Saved document",
-          summary: null,
-          context: null,
-          transcript: [],
-          coaching: [],
-          documents: [createQuestionContextDocument(
-            selectedDocument.title || "Saved document",
-            selectedDocument.content || "",
-            selectedDocument.sourceUrl || null,
-          )].filter(Boolean),
-        };
+        return null;
       }
 
       function buildMeetingLaunchContextCacheKey(meeting, baseContext, emailHistory, sessionHistory) {
@@ -4779,10 +4776,6 @@
 
         const sessionsState = state.reviewSessions;
         const filteredSessions = getFilteredReviewSessions();
-        const filteredDocuments = getFilteredReviewDocuments();
-        const documentCandidates = filteredDocuments.length || reviewSearchQueryEl.value.trim()
-          ? filteredDocuments
-          : state.orgDocuments.slice(0, 5);
 
         const sessionMarkup = sessionsState.status === "loading" && !sessionsState.items.length
           ? '<div class="section-empty">Loading saved Listen sessions...</div>'
@@ -4803,43 +4796,19 @@
                 ? '<div class="section-empty">No saved calls match the current filters.</div>'
                 : `<div class="section-empty">${escapeHtml(sessionsState.note || "No saved calls yet. Finish one call and it will appear here.")}</div>`;
 
-        const documentMarkup = documentCandidates.length
-          ? documentCandidates.map((document) => `
-              <button class="review-session-button ${document.id === state.selectedReviewDocumentId ? "active" : ""}" data-review-document-id="${document.id}">
-                <div class="row-between">
-                  <strong>${escapeHtml(document.title || "Untitled document")}</strong>
-                  <span class="badge neutral">document</span>
-                </div>
-                <div class="meta-line">${escapeHtml(formatDate(document.updatedAt))}</div>
-                <div class="muted">${escapeHtml((document.sourceName || "saved note") + (document.sourceUrl ? " / linked source" : ""))}</div>
-              </button>
-            `).join("")
-          : '<div class="section-empty">No saved documents yet.</div>';
-
         reviewSessionListEl.innerHTML = `
           <div class="review-panel">
             <div>
-              <h3>Saved Calls</h3>
+              <h3>Saved Transcriptions</h3>
+              <p class="muted">Review completed call transcripts captured by Listen.</p>
             </div>
             ${sessionMarkup}
-          </div>
-          <div class="review-panel">
-            <div>
-              <h3>Saved Documents</h3>
-              <p class="muted">Imported notes and attached documents can be opened here.</p>
-            </div>
-            ${documentMarkup}
           </div>
         `;
 
         document.querySelectorAll("[data-review-session-id]").forEach((button) => {
           button.addEventListener("click", async () => {
             await selectReviewSession(button.getAttribute("data-review-session-id"), { preserveQuestion: false });
-          });
-        });
-        document.querySelectorAll("[data-review-document-id]").forEach((button) => {
-          button.addEventListener("click", () => {
-            selectReviewDocument(button.getAttribute("data-review-document-id"));
           });
         });
 
@@ -4849,51 +4818,12 @@
         });
 
         const selectedSession = getSelectedReviewSession(filteredSessions);
-        const selectedDocument = getSelectedReviewDocument(documentCandidates);
-        if (!selectedSession && !selectedDocument) {
+        if (!selectedSession) {
           reviewSessionDetailEl.innerHTML = `
             <div>
               <div class="eyebrow">Review</div>
-              <h2 class="review-empty-title">Nothing selected</h2>
-              <p class="muted">Choose a saved call or a saved document from the left to inspect it.</p>
-            </div>
-          `;
-          return;
-        }
-
-        if (!selectedSession && selectedDocument) {
-          reviewSessionDetailEl.innerHTML = `
-            <div class="review-session-header">
-              <div>
-                <div class="eyebrow">Selected Document</div>
-                <h2>${escapeHtml(selectedDocument.title || "Untitled document")}</h2>
-                <p class="muted">${escapeHtml(selectedDocument.sourceName || "Saved note")}</p>
-              </div>
-              <div class="page-chip-row">
-                <span class="page-chip">Updated ${escapeHtml(formatDate(selectedDocument.updatedAt))}</span>
-                ${selectedDocument.mimeType ? `<span class="page-chip">${escapeHtml(selectedDocument.mimeType)}</span>` : ""}
-              </div>
-            </div>
-            <div class="review-summary-grid">
-              <div class="review-summary-section">
-                <h3>Source</h3>
-                ${selectedDocument.sourceUrl
-                  ? `<div class="review-bullet-list"><div class="review-bullet-item"><a href="${escapeHtml(selectedDocument.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(selectedDocument.sourceUrl)}</a></div></div>`
-                  : '<div class="section-empty">No source link was stored for this document.</div>'}
-              </div>
-              <div class="review-summary-section">
-                <h3>Preview</h3>
-                <div class="review-bullet-list"><div class="review-bullet-item">${escapeHtml((selectedDocument.content || "").slice(0, 280) || "No content saved.")}</div></div>
-              </div>
-            </div>
-            <div class="review-panel research-section">
-              <div class="card-header">
-                <div>
-                  <h3>Document Content</h3>
-                  <p class="muted">Read the full saved note or imported document.</p>
-                </div>
-              </div>
-              <div class="section-scroller"><div class="review-bullet-item">${escapeHtml(selectedDocument.content || "No content saved.")}</div></div>
+              <h2 class="review-empty-title">No transcription selected</h2>
+              <p class="muted">Choose a saved call from the left to inspect its transcript, summary, and coaching history.</p>
             </div>
           `;
           return;
@@ -5005,12 +4935,11 @@
         const elementKey = domKey || panelKey;
         const qaState = state.sessionQa[panelKey];
         const selectedReviewSession = getSelectedReviewSession();
-        const selectedReviewDocument = getSelectedReviewDocument();
         const hasContext = panelKey === "active"
           ? Boolean(snapshot.activeSession)
           : panelKey === "prep"
             ? Boolean(state.selectedMeetingId)
-            : Boolean(selectedReviewSession || selectedReviewDocument);
+            : Boolean(selectedReviewSession);
 
         if (!hasContext) {
           targetEl.innerHTML = panelKey === "active"
@@ -5033,8 +4962,6 @@
             ? "Ask about this meeting using the brief, research, email history, prior Listen sessions, Drive transcripts, and org context we already have."
             : selectedReviewSession
               ? `Ask about ${selectedReviewSession.meetingTitle} using its stored transcript, coaching, and meeting context.`
-              : selectedReviewDocument
-                ? `Ask about ${selectedReviewDocument.title || "this saved document"} using its stored content and org context.`
                 : "Select a saved call first so there is session context to query.";
 
         const historyMarkup = qaState.history.length

@@ -469,6 +469,7 @@ function broadcastUpdaterState(): DesktopUpdaterState {
 
 function getTrayIconPath(): string | null {
   const candidates = [
+    path.resolve(process.resourcesPath, "icon.ico"),
     path.resolve(process.cwd(), "apps", "desktop", "build", "icon.ico"),
     path.resolve(process.cwd(), "build", "icon.ico"),
     path.resolve(__dirname, "..", "..", "build", "icon.ico"),
