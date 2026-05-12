@@ -169,6 +169,7 @@ let updaterStartupCheckTimeout: NodeJS.Timeout | null = null;
 let updaterPeriodicCheckInterval: NodeJS.Timeout | null = null;
 let lastAvailableUpdateNotificationVersion: string | null = null;
 let lastDownloadedUpdateNotificationVersion: string | null = null;
+let pendingQuitAfterSessionFinalize = false;
 
 const meetingScheduler = new MeetingScheduler(popupLeadMinutes);
 const autoStopController = new AutoStopController();
@@ -2437,7 +2438,17 @@ app.whenReady().then(async () => {
   broadcastUpdaterState();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (snapshot.activeSession && !pendingQuitAfterSessionFinalize) {
+    event.preventDefault();
+    pendingQuitAfterSessionFinalize = true;
+    isQuitting = true;
+    void stopSession("manual").finally(() => {
+      app.quit();
+    });
+    return;
+  }
+
   isQuitting = true;
   if (updaterStartupCheckTimeout) {
     clearTimeout(updaterStartupCheckTimeout);
@@ -2449,6 +2460,7 @@ app.on("before-quit", () => {
   }
   embeddedRealtimeProcess?.kill();
   embeddedRealtimeProcess = null;
+  pendingQuitAfterSessionFinalize = false;
 });
 
 app.on("activate", () => {
