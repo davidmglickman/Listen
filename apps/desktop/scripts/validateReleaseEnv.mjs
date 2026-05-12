@@ -24,6 +24,7 @@ const githubOwner = process.env.LISTEN_UPDATE_GITHUB_OWNER?.trim() || "";
 const githubRepo = process.env.LISTEN_UPDATE_GITHUB_REPO?.trim() || "";
 const githubToken = process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || "";
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
 
 function isPlaceholder(value) {
   return /^YOUR_/i.test(value) || /^(changeme|example|placeholder)$/i.test(value);
@@ -46,6 +47,12 @@ if (hasGithubTarget && (!githubToken || isPlaceholder(githubToken))) {
 if (!googleClientId || isPlaceholder(googleClientId)) {
   console.error("Google OAuth is not configured for the desktop release.");
   console.error("Set GOOGLE_CLIENT_ID in the release environment so published builds can open Google calendar sign-in.");
+  process.exit(1);
+}
+
+if (!googleClientSecret || isPlaceholder(googleClientSecret)) {
+  console.error("Google OAuth client secret is not configured for the desktop release.");
+  console.error("Set GOOGLE_CLIENT_SECRET in the release environment so published builds can complete Google sign-in.");
   process.exit(1);
 }
 

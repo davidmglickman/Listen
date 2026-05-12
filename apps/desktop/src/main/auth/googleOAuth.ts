@@ -38,7 +38,7 @@ export class GoogleOAuthClient {
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
 
   isConfigured(): boolean {
-    return Boolean(this.clientId);
+    return Boolean(this.clientId && this.clientSecret);
   }
 
   getRedirectUri(port: number): string {
