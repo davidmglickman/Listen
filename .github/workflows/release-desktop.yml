@@ -22,6 +22,12 @@ jobs:
       LISTEN_UPDATE_GITHUB_OWNER: davidmglickman
       LISTEN_UPDATE_GITHUB_REPO: Listen
       LISTEN_UPDATE_GITHUB_PRIVATE: false
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_CALENDAR_ID: primary
+      MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+      MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+      MICROSOFT_TENANT_ID: common
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
