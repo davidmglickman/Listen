@@ -46,28 +46,40 @@ const outputPath = path.join(outputDir, ".env");
 
 await mkdir(outputDir, { recursive: true });
 
-if (!sourcePath) {
-  await writeFile(outputPath, "", "utf8");
-  process.exit(0);
+const values = new Map();
+
+if (sourcePath) {
+  const raw = await readFile(sourcePath, "utf8");
+  raw
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) {
+        return;
+      }
+
+      const separatorIndex = trimmed.indexOf("=");
+      if (separatorIndex <= 0) {
+        return;
+      }
+
+      const key = trimmed.slice(0, separatorIndex).trim();
+      if (!allowedKeys.has(key)) {
+        return;
+      }
+
+      values.set(key, trimmed.slice(separatorIndex + 1));
+    });
 }
 
-const raw = await readFile(sourcePath, "utf8");
-const lines = raw
-  .split(/\r?\n/)
-  .map((line) => line.trimEnd())
-  .filter((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      return false;
-    }
+for (const key of allowedKeys) {
+  const value = process.env[key];
+  if (typeof value === "string") {
+    values.set(key, value);
+  }
+}
 
-    const separatorIndex = trimmed.indexOf("=");
-    if (separatorIndex <= 0) {
-      return false;
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    return allowedKeys.has(key);
-  });
+const lines = Array.from(values.entries()).map(([key, value]) => `${key}=${value}`);
 
 await writeFile(outputPath, `${lines.join("\n")}${lines.length ? "\n" : ""}`, "utf8");

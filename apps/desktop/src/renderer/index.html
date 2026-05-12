@@ -4209,19 +4209,8 @@
 
       function renderConnections(snapshot) {
         connectionsEl.innerHTML = snapshot.calendarConnections
+          .filter((connection) => connection.provider !== "mock")
           .map((connection) => {
-            if (connection.provider === "mock") {
-              return `
-                <div class="connection-card">
-                  <div class="row-between">
-                    <strong>${connection.provider}</strong>
-                    <span class="badge neutral">demo</span>
-                  </div>
-                  <p class="body-copy">${connection.accountLabel}</p>
-                </div>
-              `;
-            }
-
             const action = connection.connected ? "disconnect" : "connect";
             const label = connection.connected ? "Disconnect" : "Connect";
             return `
