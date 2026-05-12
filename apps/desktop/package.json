@@ -1,12 +1,12 @@
 {
   "name": "@listen/desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Listen desktop meeting coach for live call prep, capture, and review.",
   "author": "Listen",
   "main": "dist/apps/desktop/src/main/main.js",
   "types": "dist/apps/desktop/src/main/main.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copyRenderer.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copyRenderer.mjs && node scripts/bundleRealtime.mjs && node scripts/preparePackagedEnv.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "npm run build && electron dist/apps/desktop/src/main/main.js",
     "pack": "npm run build && node scripts/runElectronBuilder.mjs --dir",
@@ -21,6 +21,7 @@
     "ws": "^8.18.1"
   },
   "devDependencies": {
+    "esbuild": "^0.25.4",
     "electron": "35.2.0",
     "electron-builder": "^26.0.12"
   }

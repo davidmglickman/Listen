@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, session, shell, Tray, utilityProcess } from "electron";
+import type { MessageBoxOptions } from "electron";
 import dotenv from "dotenv";
 import { autoUpdater } from "electron-updater";
 
@@ -13,8 +14,24 @@ import { CalendarSyncClient } from "./calendar/calendarSyncClient";
 import { RealtimeClient } from "./realtime/realtimeClient";
 import { MeetingScheduler } from "./scheduler/meetingScheduler";
 import { AutoStopController } from "./session/autoStopController";
-import { SessionStore, type StoredMeetingLaunchContext } from "./storage/sessionStore";
+import { SessionStore, type DesktopCloseBehavior, type StoredMeetingLaunchContext, type StoredRuntimeSecrets } from "./storage/sessionStore";
 import { fetchWithTimeout } from "./http/fetchWithTimeout";
+
+type ContextQuestionDocument = {
+  title: string;
+  content: string;
+  sourceUrl?: string | null;
+};
+
+type ContextQuestionPayload = {
+  question: string;
+  title: string;
+  summary?: SessionSummary | null;
+  context?: MeetingContext | null;
+  transcript?: SessionHistoryDetail["transcript"];
+  coaching?: SessionHistoryDetail["coaching"];
+  documents?: ContextQuestionDocument[];
+};
 
 function resolveEnvPath(): string | undefined {
   const candidates = [
@@ -22,6 +39,9 @@ function resolveEnvPath(): string | undefined {
     path.resolve(process.cwd(), "..", "..", ".env"),
     path.resolve(__dirname, "..", "..", "..", "..", "..", "..", ".env"),
     path.resolve(__dirname, "..", "..", "..", "..", ".env"),
+    path.resolve(path.dirname(process.execPath), ".env"),
+    path.resolve(process.resourcesPath, ".env"),
+    path.resolve(process.resourcesPath, "app", ".env"),
   ];
 
   return candidates.find((candidate) => existsSync(candidate));
@@ -31,15 +51,68 @@ dotenv.config({ path: resolveEnvPath() });
 
 if (!app.isPackaged) {
   const electronStateRoot = path.resolve(process.cwd(), ".cache", "listen-desktop");
-  app.setPath("userData", path.join(electronStateRoot, "user-data"));
-  app.setPath("sessionData", path.join(electronStateRoot, "session-data"));
+  const userDataPath = path.join(electronStateRoot, "user-data");
+  const sessionDataPath = path.join(electronStateRoot, "session-data");
+  const cachePath = path.join(electronStateRoot, "cache");
+
+  [electronStateRoot, userDataPath, sessionDataPath, cachePath].forEach((directoryPath) => {
+    mkdirSync(directoryPath, { recursive: true });
+  });
+
+  app.setPath("userData", userDataPath);
+  app.setPath("sessionData", sessionDataPath);
+  app.setPath("cache", cachePath);
   app.disableHardwareAcceleration();
 }
 
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function resolveRealtimeHttpUrl(): string {
+  const explicitUrl = process.env.LISTEN_API_BASE_URL?.trim();
+  if (explicitUrl) {
+    return trimTrailingSlash(explicitUrl);
+  }
+
+  return `http://localhost:${process.env.LISTEN_REALTIME_PORT ?? 8787}`;
+}
+
+function resolveRealtimeWsUrl(httpUrl: string): string {
+  const explicitUrl = process.env.LISTEN_WS_URL?.trim();
+  if (explicitUrl) {
+    return trimTrailingSlash(explicitUrl);
+  }
+
+  try {
+    const url = new URL(httpUrl);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = "/ws";
+    url.search = "";
+    url.hash = "";
+    return trimTrailingSlash(url.toString());
+  } catch {
+    return `ws://localhost:${process.env.LISTEN_REALTIME_PORT ?? 8787}/ws`;
+  }
+}
+
+function normalizeStoredRuntimeSecrets(value: Partial<StoredRuntimeSecrets> | null | undefined): StoredRuntimeSecrets {
+  return {
+    aiApiKey: typeof value?.aiApiKey === "string" ? value.aiApiKey.trim() : "",
+    transcriptionApiKey: typeof value?.transcriptionApiKey === "string" ? value.transcriptionApiKey.trim() : "",
+  };
+}
+
+function getEnvRuntimeSecrets(): StoredRuntimeSecrets {
+  return {
+    aiApiKey: process.env.LISTEN_AI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || "",
+    transcriptionApiKey: process.env.DEEPGRAM_API_KEY?.trim() || "",
+  };
+}
+
 const popupLeadMinutes = Number(process.env.LISTEN_MEETING_POPUP_LEAD_MINUTES ?? 2);
-const realtimeHttpUrl = `http://localhost:${process.env.LISTEN_REALTIME_PORT ?? 8787}`;
-const realtimeUrl = `ws://localhost:${process.env.LISTEN_REALTIME_PORT ?? 8787}/ws`;
-const transcriptionConfigured = Boolean(process.env.DEEPGRAM_API_KEY?.trim());
+const realtimeHttpUrl = resolveRealtimeHttpUrl();
+const realtimeUrl = resolveRealtimeWsUrl(realtimeHttpUrl);
 const updateFeedUrl = process.env.LISTEN_UPDATE_FEED_URL?.trim() || "";
 const updateChannel = process.env.LISTEN_UPDATE_CHANNEL?.trim() || "latest";
 const updateGithubOwner = process.env.LISTEN_UPDATE_GITHUB_OWNER?.trim() || "";
@@ -63,6 +136,18 @@ let activeMeetingRecord: MeetingRecord | null = null;
 let activeMeetingContext: MeetingContext | null = null;
 let pendingStopTimeout: NodeJS.Timeout | null = null;
 let updaterConfigured = false;
+let tray: Tray | null = null;
+let isQuitting = false;
+let desktopCloseBehavior: DesktopCloseBehavior = "ask";
+let desktopRuntimeSecrets: StoredRuntimeSecrets = { aiApiKey: "", transcriptionApiKey: "" };
+let updaterCheckStartedAt: number | null = null;
+let pendingUpdaterStatePatch: Partial<DesktopUpdaterState> | null = null;
+let pendingUpdaterStateTimeout: NodeJS.Timeout | null = null;
+let embeddedRealtimeModuleLoad: Promise<void> | null = null;
+let embeddedRealtimeProcess: Electron.UtilityProcess | null = null;
+
+const minimumUpdaterCheckingDurationMs = 1000;
+const embeddedRealtimeStartupTimeoutMs = 15_000;
 
 let updaterState: DesktopUpdaterState = {
   enabled: updateProvider !== "none",
@@ -96,6 +181,112 @@ function createInitialCaptureHealth() {
       lastActivityAt: null,
     },
   };
+}
+
+function resolveDesktopDatabasePath(): string {
+  return process.env.LISTEN_DB_PATH?.trim() || (app.isPackaged ? path.join(app.getPath("userData"), "listen.db") : path.resolve(process.cwd(), "data", "listen.db"));
+}
+
+function resolveBundledRealtimeEntry(): string | null {
+  const candidates = [
+    path.resolve(process.resourcesPath, "realtime", "server.cjs"),
+    path.resolve(app.getAppPath(), "dist", "apps", "desktop", "resources", "realtime", "server.cjs"),
+    path.resolve(__dirname, "..", "..", "resources", "realtime", "server.cjs"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+async function isRealtimeServiceHealthy(): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`${realtimeHttpUrl}/health`, {}, 1_500);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForRealtimeServiceReady(timeoutMs = embeddedRealtimeStartupTimeoutMs): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isRealtimeServiceHealthy()) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  return false;
+}
+
+async function ensureRealtimeServiceAvailable(databasePath: string): Promise<void> {
+  if (await isRealtimeServiceHealthy()) {
+    return;
+  }
+
+  if (!app.isPackaged) {
+    return;
+  }
+
+  if (embeddedRealtimeModuleLoad) {
+    await embeddedRealtimeModuleLoad;
+    await waitForRealtimeServiceReady();
+    return;
+  }
+
+  const bundledEntry = resolveBundledRealtimeEntry();
+  if (!bundledEntry) {
+    console.warn("Bundled realtime service entry was not found in packaged desktop resources.");
+    return;
+  }
+
+  process.env.HOST = process.env.HOST?.trim() || "127.0.0.1";
+  process.env.LISTEN_DB_PATH = databasePath;
+  process.env.LISTEN_REALTIME_PORT = process.env.LISTEN_REALTIME_PORT?.trim() || "8787";
+  process.env.LISTEN_PUBLIC_BASE_URL = process.env.LISTEN_PUBLIC_BASE_URL?.trim() || realtimeHttpUrl;
+
+  embeddedRealtimeModuleLoad = Promise.resolve().then(() => {
+    embeddedRealtimeProcess = utilityProcess.fork(bundledEntry, [], {
+      cwd: app.getPath("userData"),
+      env: {
+        ...process.env,
+      },
+      stdio: "pipe",
+      serviceName: "Listen Realtime Service",
+    });
+
+    embeddedRealtimeProcess.stdout?.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (text) {
+        console.log(`[realtime] ${text}`);
+      }
+    });
+    embeddedRealtimeProcess.stderr?.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (text) {
+        console.error(`[realtime] ${text}`);
+      }
+    });
+    embeddedRealtimeProcess.on("exit", (code) => {
+      console.warn(`Bundled realtime service exited with code ${code ?? -1}.`);
+      embeddedRealtimeProcess = null;
+      embeddedRealtimeModuleLoad = null;
+    });
+  });
+
+  try {
+    await embeddedRealtimeModuleLoad;
+  } catch (error) {
+    console.warn("Bundled realtime service failed to launch in a utility process.", error);
+    embeddedRealtimeModuleLoad = null;
+    embeddedRealtimeProcess = null;
+    return;
+  }
+
+  const healthy = await waitForRealtimeServiceReady();
+  if (!healthy) {
+    console.warn(`Bundled realtime service did not become healthy at ${realtimeHttpUrl} within ${embeddedRealtimeStartupTimeoutMs}ms.`);
+  }
 }
 
 const snapshot: AppSnapshot = {
@@ -135,6 +326,21 @@ interface MeetingSessionHistory {
   status: "ready" | "unavailable" | "error";
   note: string;
   sessions: RelatedMeetingSession[];
+}
+
+interface MeetingDriveDocument {
+  id: string;
+  title: string;
+  modifiedAt: string;
+  mimeType: string;
+  sourceUrl: string;
+  snippet: string;
+}
+
+interface MeetingDriveHistory {
+  status: "ready" | "not_connected" | "needs_reconnect" | "unavailable" | "error";
+  note: string;
+  documents: MeetingDriveDocument[];
 }
 
 type UpdaterAvailability = "disabled" | "idle" | "checking" | "available" | "downloading" | "downloaded" | "not-available" | "error";
@@ -261,7 +467,216 @@ function broadcastUpdaterState(): DesktopUpdaterState {
   return updaterState;
 }
 
+function getTrayIconPath(): string | null {
+  const candidates = [
+    path.resolve(process.cwd(), "apps", "desktop", "build", "icon.ico"),
+    path.resolve(process.cwd(), "build", "icon.ico"),
+    path.resolve(__dirname, "..", "..", "build", "icon.ico"),
+    path.resolve(__dirname, "..", "..", "..", "build", "icon.ico"),
+    path.join(app.getAppPath(), "build", "icon.ico"),
+    path.join(app.getAppPath(), "apps", "desktop", "build", "icon.ico"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.setSkipTaskbar(false);
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.focus();
+}
+
+function hideMainWindowToTray(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.setSkipTaskbar(true);
+  mainWindow.hide();
+}
+
+function updateTrayMenu(): void {
+  if (!tray) {
+    return;
+  }
+
+  tray.setToolTip("Listen");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ? "Focus Listen" : "Open Listen",
+        click: () => showMainWindow(),
+      },
+      {
+        label: "Check for updates",
+        click: () => {
+          void checkForDesktopUpdates();
+          showMainWindow();
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Quit Listen",
+        click: () => {
+          isQuitting = true;
+          closeMeetingWindow();
+          app.quit();
+        },
+      },
+    ]),
+  );
+}
+
+function createTray(): void {
+  if (tray) {
+    updateTrayMenu();
+    return;
+  }
+
+  const trayIconPath = getTrayIconPath();
+  if (!trayIconPath) {
+    return;
+  }
+
+  tray = new Tray(trayIconPath);
+  tray.on("click", () => showMainWindow());
+  updateTrayMenu();
+}
+
+async function promptForTrayBehavior(): Promise<DesktopCloseBehavior | "cancel"> {
+  const windowInstance = mainWindow;
+  const dialogOptions: MessageBoxOptions = {
+    type: "question",
+    buttons: ["Hide to tray", "Quit", "Cancel"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+    checkboxLabel: "Remember my choice",
+    title: "Keep Listen running?",
+    message: "Close Listen to the tray instead of quitting?",
+    detail: "This keeps reminders, quick reopen, and update checks available in the background. You can fully exit from the tray menu at any time.",
+  };
+  const result = windowInstance
+    ? await dialog.showMessageBox(windowInstance, dialogOptions)
+    : await dialog.showMessageBox(dialogOptions);
+
+  const behavior = result.response === 0 ? "tray" : result.response === 1 ? "quit" : "cancel";
+  if (result.checkboxChecked && behavior !== "cancel") {
+    desktopCloseBehavior = behavior;
+    await sessionStore.writeDesktopCloseBehavior(behavior);
+  }
+
+  return behavior;
+}
+
+async function confirmAutomaticSessionEnd(reason: SessionStopReason): Promise<boolean> {
+  const reasonLabel = reason === "provider_end_state"
+    ? "Listen thinks the meeting ended."
+    : reason === "meeting_window_closed"
+      ? "Listen saw the meeting window close."
+      : reason === "calendar_end"
+        ? "Listen reached the scheduled end of the meeting and then saw inactivity."
+        : "Listen detected a long period of inactivity."
+  ;
+  const dialogOptions: MessageBoxOptions = {
+    type: "question",
+    buttons: ["End session", "Keep session running"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    title: "End Listen session?",
+    message: reasonLabel,
+    detail: "Confirm whether Listen should stop the current session now.",
+  };
+  const windowInstance = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const result = windowInstance
+    ? await dialog.showMessageBox(windowInstance, dialogOptions)
+    : await dialog.showMessageBox(dialogOptions);
+
+  return result.response === 0;
+}
+
+function handleMainWindowClose(event: Electron.Event): void {
+  if (isQuitting) {
+    return;
+  }
+
+  if (desktopCloseBehavior === "quit") {
+    isQuitting = true;
+    closeMeetingWindow();
+    app.quit();
+    return;
+  }
+
+  event.preventDefault();
+
+  if (desktopCloseBehavior === "tray") {
+    hideMainWindowToTray();
+    return;
+  }
+
+  void promptForTrayBehavior().then((behavior) => {
+    if (behavior === "tray") {
+      hideMainWindowToTray();
+      return;
+    }
+
+    if (behavior === "quit") {
+      isQuitting = true;
+      closeMeetingWindow();
+      app.quit();
+    }
+  });
+}
+
 function setUpdaterState(patch: Partial<DesktopUpdaterState>): DesktopUpdaterState {
+  const nextAvailability = patch.availability;
+
+  if (nextAvailability === "checking") {
+    updaterCheckStartedAt = Date.now();
+    pendingUpdaterStatePatch = null;
+    if (pendingUpdaterStateTimeout) {
+      clearTimeout(pendingUpdaterStateTimeout);
+      pendingUpdaterStateTimeout = null;
+    }
+  } else if (updaterState.availability === "checking" && updaterCheckStartedAt !== null) {
+    const remainingDelay = minimumUpdaterCheckingDurationMs - (Date.now() - updaterCheckStartedAt);
+    if (remainingDelay > 0) {
+      pendingUpdaterStatePatch = patch;
+      if (pendingUpdaterStateTimeout) {
+        clearTimeout(pendingUpdaterStateTimeout);
+      }
+      pendingUpdaterStateTimeout = setTimeout(() => {
+        pendingUpdaterStateTimeout = null;
+        updaterCheckStartedAt = null;
+        const delayedPatch = pendingUpdaterStatePatch;
+        pendingUpdaterStatePatch = null;
+        if (delayedPatch) {
+          setUpdaterState(delayedPatch);
+        }
+      }, remainingDelay);
+      return updaterState;
+    }
+  }
+
+  if (nextAvailability && nextAvailability !== "checking") {
+    updaterCheckStartedAt = null;
+    pendingUpdaterStatePatch = null;
+    if (pendingUpdaterStateTimeout) {
+      clearTimeout(pendingUpdaterStateTimeout);
+      pendingUpdaterStateTimeout = null;
+    }
+  }
+
   updaterState = {
     ...updaterState,
     ...patch,
@@ -426,6 +841,59 @@ function normalizeCoachingSettings(value: unknown): CoachingSettings {
     directness: candidate.directness === "gentle" || candidate.directness === "blunt" ? candidate.directness : defaultCoachingSettings.directness,
     frequency: candidate.frequency === "minimal" || candidate.frequency === "proactive" ? candidate.frequency : defaultCoachingSettings.frequency,
   };
+}
+
+function getEffectiveDesktopRuntimeSecrets(): StoredRuntimeSecrets {
+  const envSecrets = getEnvRuntimeSecrets();
+  return {
+    aiApiKey: desktopRuntimeSecrets.aiApiKey || envSecrets.aiApiKey,
+    transcriptionApiKey: desktopRuntimeSecrets.transcriptionApiKey || envSecrets.transcriptionApiKey,
+  };
+}
+
+function getRuntimeCapabilitiesSnapshot(): { aiConfigured: boolean; cloudTranscriptionConfigured: boolean } {
+  const secrets = getEffectiveDesktopRuntimeSecrets();
+  return {
+    aiConfigured: Boolean(secrets.aiApiKey),
+    cloudTranscriptionConfigured: Boolean(secrets.transcriptionApiKey),
+  };
+}
+
+async function readDesktopRuntimeSecrets(): Promise<StoredRuntimeSecrets> {
+  return normalizeStoredRuntimeSecrets(await sessionStore.readRuntimeSecrets());
+}
+
+async function syncDesktopRuntimeSecretsToRealtime(): Promise<void> {
+  const secrets = getEffectiveDesktopRuntimeSecrets();
+  const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/runtime/secrets`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      aiApiKey: secrets.aiApiKey,
+      deepgramApiKey: secrets.transcriptionApiKey,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to sync runtime secrets: ${response.status} ${body}`.trim());
+  }
+}
+
+async function saveDesktopRuntimeSecrets(value: StoredRuntimeSecrets): Promise<StoredRuntimeSecrets> {
+  const normalized = normalizeStoredRuntimeSecrets(value);
+  await sessionStore.writeRuntimeSecrets(normalized);
+  desktopRuntimeSecrets = normalized;
+
+  try {
+    await syncDesktopRuntimeSecretsToRealtime();
+  } catch (error) {
+    console.warn("Saved runtime secrets locally, but failed to sync them to realtime.", error);
+  }
+
+  return normalized;
 }
 
 async function readDesktopCoachingPreferences(): Promise<{ guidance: string; settings: CoachingSettings }> {
@@ -652,7 +1120,63 @@ async function deleteDesktopOrgDocument(documentId: string): Promise<void> {
   }
 }
 
+async function sendRealtimeSessionStart(meeting: MeetingRecord, meetingContext: MeetingContext | null): Promise<void> {
+  if (!snapshot.activeSession) {
+    throw new Error("Start a meeting or finish one first so there is session context to query.");
+  }
+
+  const client = attachRealtimeClient();
+  await client.connect();
+  const sent = client.send({
+    kind: "session_start",
+    sessionId: snapshot.activeSession.id,
+    meetingId: meeting.id,
+    expectedEndAt: meeting.endsAt,
+    meetingTitle: meeting.title,
+    meetingProvider: meeting.provider,
+    calendarProvider: meeting.calendarProvider,
+    meetingContext,
+    attendees: (meeting.attendees ?? [])
+      .filter((attendee) => attendee.fullName.trim().length > 0)
+      .map((attendee) => ({
+        fullName: attendee.fullName.trim(),
+        email: attendee.email?.trim() || undefined,
+      })),
+  });
+
+  if (!sent) {
+    throw new Error(`The realtime service is unavailable at ${realtimeHttpUrl}. Start or restart @listen/realtime, then try again.`);
+  }
+}
+
+async function ensureRealtimeLiveSessionAvailable(): Promise<void> {
+  if (!snapshot.activeSession || !activeMeetingRecord) {
+    return;
+  }
+
+  try {
+    const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/live-sessions/${encodeURIComponent(snapshot.activeSession.id)}/debug`, {}, 2_000);
+    if (response.ok) {
+      return;
+    }
+
+    if (response.status !== 404) {
+      return;
+    }
+  } catch {
+    // Fall through and attempt to rehydrate the live session over websocket.
+  }
+
+  await sendRealtimeSessionStart(activeMeetingRecord, activeMeetingContext);
+}
+
 async function askDesktopSessionQuestion(question: string, sessionId?: string | null): Promise<SessionQuestionAnswer> {
+  try {
+    await syncDesktopRuntimeSecretsToRealtime();
+  } catch (error) {
+    console.warn("Failed to sync runtime secrets before session Q&A.", error);
+  }
+
   const trimmedQuestion = question.trim();
   if (!trimmedQuestion) {
     throw new Error("Question is required.");
@@ -661,6 +1185,11 @@ async function askDesktopSessionQuestion(question: string, sessionId?: string | 
   const explicitSessionId = String(sessionId || "").trim();
   const activeSessionId = snapshot.activeSession?.id ?? null;
   const completedSessionId = snapshot.lastSummary?.sessionId ?? null;
+
+  if (!explicitSessionId && activeSessionId) {
+    await ensureRealtimeLiveSessionAvailable();
+  }
+
   const endpoint = explicitSessionId
     ? `/api/sessions/${encodeURIComponent(explicitSessionId)}/questions`
     : activeSessionId
@@ -684,6 +1213,70 @@ async function askDesktopSessionQuestion(question: string, sessionId?: string | 
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Failed to answer session question: ${response.status} ${body}`.trim());
+  }
+
+  return response.json() as Promise<SessionQuestionAnswer>;
+}
+
+function formatContextQuestionError(status: number, body: string): string {
+  const normalizedBody = body.trim();
+  if (status === 404 && /Cannot POST \/api\/questions\/context/i.test(normalizedBody)) {
+    return "The realtime service is running an older build and does not support context Q&A yet. Restart the realtime service, then try again.";
+  }
+
+  return `Failed to answer context question: ${status} ${normalizedBody}`.trim();
+}
+
+function formatRealtimeQuestionRequestError(error: unknown): Error {
+  const message = error instanceof Error ? error.message.trim() : String(error).trim();
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|socket|network/i.test(message)) {
+    return new Error(`The realtime service is unavailable at ${realtimeHttpUrl}. Start or restart @listen/realtime, then try again.`);
+  }
+
+  if (/Request timed out after \d+ms/i.test(message)) {
+    return new Error(`The realtime service at ${realtimeHttpUrl} did not respond in time. Make sure @listen/realtime is running, then try again.`);
+  }
+
+  return error instanceof Error ? error : new Error(message);
+}
+
+async function askDesktopContextQuestion(payload: ContextQuestionPayload): Promise<SessionQuestionAnswer> {
+  try {
+    await syncDesktopRuntimeSecretsToRealtime();
+  } catch (error) {
+    console.warn("Failed to sync runtime secrets before context Q&A.", error);
+  }
+
+  const trimmedQuestion = payload.question.trim();
+  const trimmedTitle = payload.title.trim();
+  if (!trimmedQuestion) {
+    throw new Error("Question is required.");
+  }
+
+  if (!trimmedTitle) {
+    throw new Error("Context title is required.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(`${realtimeHttpUrl}/api/questions/context`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ...payload,
+        question: trimmedQuestion,
+        title: trimmedTitle,
+      }),
+    });
+  } catch (error) {
+    throw formatRealtimeQuestionRequestError(error);
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(formatContextQuestionError(response.status, body));
   }
 
   return response.json() as Promise<SessionQuestionAnswer>;
@@ -765,6 +1358,67 @@ function buildMeetingEmailQuery(meeting: MeetingRecord): string {
 
 function getGmailHeader(payload: { headers?: Array<{ name?: string; value?: string }> } | undefined, name: string): string {
   return payload?.headers?.find((header) => header.name?.toLowerCase() === name.toLowerCase())?.value?.trim() ?? "";
+}
+
+function escapeGoogleQueryTerm(value: string): string {
+  return value.replace(/'/g, "\\'");
+}
+
+function buildMeetingDriveQuery(meeting: MeetingRecord): string {
+  const tokens = [
+    ...tokenizeMeetingText(meeting.title),
+    ...(meeting.attendees ?? []).flatMap((attendee) => tokenizeMeetingText(`${attendee.fullName || ""} ${attendee.email || ""}`)),
+  ]
+    .filter((token) => token.length >= 4)
+    .filter((token, index, values) => values.indexOf(token) === index)
+    .slice(0, 6);
+
+  if (!tokens.length) {
+    return "";
+  }
+
+  const searchClause = tokens
+    .map((token) => `(name contains '${escapeGoogleQueryTerm(token)}' or fullText contains '${escapeGoogleQueryTerm(token)}')`)
+    .join(" or ");
+
+  return [
+    "trashed = false",
+    "(mimeType = 'application/vnd.google-apps.document' or mimeType = 'text/plain' or mimeType = 'text/markdown')",
+    `(${searchClause})`,
+  ].join(" and ");
+}
+
+function buildMeetingDriveSnippet(content: string, meeting: MeetingRecord): string {
+  const normalizedContent = content.replace(/\s+/g, " ").trim();
+  if (!normalizedContent) {
+    return "";
+  }
+
+  const tokens = new Set([
+    ...tokenizeMeetingText(meeting.title),
+    ...(meeting.attendees ?? []).flatMap((attendee) => tokenizeMeetingText(`${attendee.fullName || ""} ${attendee.email || ""}`)),
+  ]);
+  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const matchingLine = lines.find((line) => tokenizeMeetingText(line).some((token) => tokens.has(token)));
+  const snippet = matchingLine || normalizedContent;
+  return snippet.slice(0, 320).trim();
+}
+
+async function readGoogleDriveTextDocument(accessToken: string, fileId: string, mimeType: string): Promise<string> {
+  const endpoint = mimeType === "application/vnd.google-apps.document"
+    ? `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent("text/plain")}`
+    : `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const response = await fetchWithTimeout(endpoint, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    return "";
+  }
+
+  return (await response.text()).trim();
 }
 
 function buildTranscriptHistoryNote(detail: SessionHistoryDetail, meeting: MeetingRecord): string {
@@ -1072,6 +1726,120 @@ async function readDesktopMeetingSessionHistory(meetingId: string): Promise<Meet
   };
 }
 
+async function readDesktopMeetingDriveHistory(meetingId: string): Promise<MeetingDriveHistory> {
+  const meeting = calendarService.getUpcomingMeetings().find((item) => item.id === meetingId);
+  if (!meeting) {
+    return {
+      status: "unavailable",
+      note: "Meeting not found.",
+      documents: [],
+    };
+  }
+
+  const accessToken = await calendarService.getAccessToken("google");
+  if (!accessToken) {
+    return {
+      status: "not_connected",
+      note: "Connect Google in Setup to search Google Drive transcripts for this meeting.",
+      documents: [],
+    };
+  }
+
+  const query = buildMeetingDriveQuery(meeting);
+  if (!query) {
+    return {
+      status: "unavailable",
+      note: "There is not enough meeting metadata yet to search Google Drive transcripts.",
+      documents: [],
+    };
+  }
+
+  const listResponse = await fetchWithTimeout(
+    `https://www.googleapis.com/drive/v3/files?pageSize=6&orderBy=modifiedTime desc&includeItemsFromAllDrives=true&supportsAllDrives=true&fields=files(id,name,mimeType,modifiedTime,webViewLink)&q=${encodeURIComponent(query)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!listResponse.ok) {
+    const body = await listResponse.text();
+    const { reason, message } = parseGoogleApiErrorBody(body);
+
+    if (listResponse.status === 401) {
+      return {
+        status: "needs_reconnect",
+        note: "Reconnect Google in Setup to grant Drive access for transcript history.",
+        documents: [],
+      };
+    }
+
+    if (listResponse.status === 403) {
+      if (["ACCESS_TOKEN_SCOPE_INSUFFICIENT", "insufficientPermissions"].includes(reason)) {
+        return {
+          status: "needs_reconnect",
+          note: "Google is connected, but Drive permission is missing. Reconnect Google in Setup and accept Drive access.",
+          documents: [],
+        };
+      }
+
+      if (["SERVICE_DISABLED", "accessNotConfigured"].includes(reason) || /drive api has not been used|api has not been used|service has been disabled/i.test(message)) {
+        return {
+          status: "error",
+          note: "Google is connected, but the Drive API is not enabled for this project. Enable the Drive API in Google Cloud, then refresh transcript history.",
+          documents: [],
+        };
+      }
+    }
+
+    return {
+      status: "error",
+      note: `Google Drive search failed: ${listResponse.status} ${body}`.trim(),
+      documents: [],
+    };
+  }
+
+  const payload = (await listResponse.json()) as {
+    files?: Array<{
+      id?: string;
+      name?: string;
+      mimeType?: string;
+      modifiedTime?: string;
+      webViewLink?: string;
+    }>;
+  };
+
+  const files = (payload.files ?? []).filter((file) => Boolean(file.id && file.name && file.mimeType));
+  if (!files.length) {
+    return {
+      status: "ready",
+      note: "No related Google Drive transcripts were found for this meeting.",
+      documents: [],
+    };
+  }
+
+  const documents = (await Promise.all(files.map(async (file) => {
+    const content = await readGoogleDriveTextDocument(accessToken, file.id!, file.mimeType!);
+    return {
+      id: file.id!,
+      title: file.name!,
+      modifiedAt: file.modifiedTime || "",
+      mimeType: file.mimeType!,
+      sourceUrl: file.webViewLink || `https://drive.google.com/file/d/${encodeURIComponent(file.id!)}/view`,
+      snippet: buildMeetingDriveSnippet(content, meeting),
+    } satisfies MeetingDriveDocument;
+  }))).filter((document) => Boolean(document.title));
+
+  return {
+    status: "ready",
+    note: documents.length
+      ? "Google Drive documents that look related to this meeting based on title, attendee names, and document text."
+      : "No readable Google Drive transcript documents were returned for this meeting.",
+    documents,
+  };
+}
+
 function closeMeetingWindow(): void {
   if (!meetingWindow) {
     return;
@@ -1263,7 +2031,16 @@ async function refreshCalendars(): Promise<AppSnapshot> {
   return broadcastSnapshot();
 }
 
-async function startSession(meeting: MeetingRecord, meetingContext: MeetingContext | null): Promise<AppSnapshot> {
+async function startSession(
+  meeting: MeetingRecord,
+  meetingContext: MeetingContext | null,
+  options: { openMeetingWindow?: boolean } = {},
+): Promise<AppSnapshot> {
+  if (snapshot.activeSession) {
+    return broadcastSnapshot();
+  }
+
+  const { openMeetingWindow = true } = options;
   snapshot.pendingPopupMeeting = null;
   resetCaptureHealth();
   updateCaptureHealth("microphone", "starting", "Waiting for microphone permission.");
@@ -1280,6 +2057,13 @@ async function startSession(meeting: MeetingRecord, meetingContext: MeetingConte
   };
   activeMeetingRecord = meeting;
   activeMeetingContext = meetingContext;
+  const transcriptionConfigured = getRuntimeCapabilitiesSnapshot().cloudTranscriptionConfigured;
+
+  try {
+    await syncDesktopRuntimeSecretsToRealtime();
+  } catch (error) {
+    console.warn("Failed to sync runtime secrets before session start.", error);
+  }
 
   if (!transcriptionConfigured) {
     snapshot.coaching = [
@@ -1288,31 +2072,23 @@ async function startSession(meeting: MeetingRecord, meetingContext: MeetingConte
         sessionId: snapshot.activeSession.id,
         severity: "warning",
         title: "Live transcription is disabled",
-        message: "DEEPGRAM_API_KEY is not configured. Audio capture can still run, but no transcript will appear until that key is set and the realtime service is restarted.",
+        message: "A transcription API key is not configured in Setup. Audio capture can still run, but no transcript will appear until that key is added for this user.",
         createdAt: new Date().toISOString(),
       },
     ];
   }
 
-  if (meeting.launchStrategy === "browser") {
-    createMeetingWindow(meeting);
-  } else {
-    await shell.openExternal(meeting.joinUrl);
+  if (openMeetingWindow && meeting.joinUrl) {
+    if (meeting.launchStrategy === "browser") {
+      createMeetingWindow(meeting);
+    } else {
+      await shell.openExternal(meeting.joinUrl);
+    }
   }
 
   const client = attachRealtimeClient();
   try {
-    await client.connect();
-    client.send({
-      kind: "session_start",
-      sessionId: snapshot.activeSession.id,
-      meetingId: meeting.id,
-      expectedEndAt: meeting.endsAt,
-      meetingTitle: meeting.title,
-      meetingProvider: meeting.provider,
-      calendarProvider: meeting.calendarProvider,
-      meetingContext,
-    });
+    await sendRealtimeSessionStart(meeting, meetingContext);
   } catch (error) {
     console.error("Failed to connect to realtime service", error);
   }
@@ -1355,9 +2131,9 @@ async function stopSession(reason: SessionStopReason): Promise<AppSnapshot> {
 
 function registerHandlers(): void {
   ipcMain.handle("app:get-snapshot", async () => snapshot);
-  ipcMain.handle("app:get-runtime-capabilities", async () => ({
-    cloudTranscriptionConfigured: transcriptionConfigured,
-  }));
+  ipcMain.handle("app:get-runtime-capabilities", async () => getRuntimeCapabilitiesSnapshot());
+  ipcMain.handle("runtime-secrets:get", async () => readDesktopRuntimeSecrets());
+  ipcMain.handle("runtime-secrets:save", async (_event, secrets: StoredRuntimeSecrets) => saveDesktopRuntimeSecrets(secrets));
   ipcMain.handle("updater:get-state", async () => updaterState);
   ipcMain.handle("updater:check", async () => checkForDesktopUpdates());
   ipcMain.handle("updater:install", async () => installDownloadedUpdate());
@@ -1372,6 +2148,7 @@ function registerHandlers(): void {
   ipcMain.handle("meeting-templates:save", async (_event, template) => saveDesktopMeetingTemplate(template));
   ipcMain.handle("meeting-templates:delete", async (_event, templateId: string) => deleteDesktopMeetingTemplate(templateId));
   ipcMain.handle("session:ask-question", async (_event, question: string, sessionId?: string | null) => askDesktopSessionQuestion(question, sessionId));
+  ipcMain.handle("context:ask-question", async (_event, payload: ContextQuestionPayload) => askDesktopContextQuestion(payload));
   ipcMain.handle("session:list", async (_event, limit?: number) => listDesktopSessions(limit));
   ipcMain.handle("session:get", async (_event, sessionId: string) => readDesktopSessionDetail(sessionId));
   ipcMain.handle("calendar:refresh", async () => refreshCalendars());
@@ -1384,6 +2161,7 @@ function registerHandlers(): void {
   );
   ipcMain.handle("meeting:email-history", async (_event, meetingId: string) => readDesktopMeetingEmailHistory(meetingId));
   ipcMain.handle("meeting:session-history", async (_event, meetingId: string) => readDesktopMeetingSessionHistory(meetingId));
+  ipcMain.handle("meeting:drive-history", async (_event, meetingId: string) => readDesktopMeetingDriveHistory(meetingId));
   ipcMain.handle("calendar:connect", async (_event, provider: "google" | "microsoft") => {
     await calendarService.connect(provider);
     return refreshCalendars();
@@ -1408,6 +2186,17 @@ function registerHandlers(): void {
     }
 
     return startSession(meeting, meetingContext);
+  });
+  ipcMain.handle("meeting:auto-start", async (_event, meetingId: string | null, meetingContext: MeetingContext | null) => {
+    const meeting = meetingId
+      ? calendarService.getUpcomingMeetings().find((item) => item.id === meetingId) ?? calendarService.createInstantMeeting()
+      : calendarService.createInstantMeeting();
+
+    if (meetingContext) {
+      await saveDesktopMeetingBrief(meeting.id, meetingContext);
+    }
+
+    return startSession(meeting, meetingContext, { openMeetingWindow: false });
   });
   ipcMain.handle("meeting:dismiss-popup", async () => {
     snapshot.pendingPopupMeeting = null;
@@ -1500,10 +2289,30 @@ function createControlWindow(): void {
   });
   mainWindow.setMenuBarVisibility(false);
 
+  createTray();
+  updateTrayMenu();
+
+  mainWindow.on("close", (event) => {
+    handleMainWindowClose(event);
+  });
+
+  mainWindow.on("show", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    mainWindow.setSkipTaskbar(false);
+    updateTrayMenu();
+  });
+
+  mainWindow.on("hide", () => {
+    updateTrayMenu();
+  });
+
   mainWindow.on("closed", () => {
     if (mainWindow?.isDestroyed()) {
       mainWindow = null;
     }
+    updateTrayMenu();
   });
 
   if (!rendererEntry) {
@@ -1515,9 +2324,9 @@ function createControlWindow(): void {
 
 app.whenReady().then(async () => {
   configureSessionPermissions();
-  sessionStore = new SessionStore(
-    process.env.LISTEN_DB_PATH?.trim() || (app.isPackaged ? path.join(app.getPath("userData"), "listen.db") : path.resolve(process.cwd(), "data", "listen.db")),
-  );
+  const databasePath = resolveDesktopDatabasePath();
+  sessionStore = new SessionStore(databasePath);
+  await ensureRealtimeServiceAvailable(databasePath);
   const calendarSyncClient = new CalendarSyncClient(realtimeHttpUrl);
   const meetingResearchClient = new MeetingResearchClient(realtimeHttpUrl);
   calendarService = new CalendarService(
@@ -1528,6 +2337,14 @@ app.whenReady().then(async () => {
   );
   const persisted = await calendarService.initialize();
   snapshot.lastSummary = persisted.lastSummary;
+  desktopCloseBehavior = await sessionStore.readDesktopCloseBehavior();
+  desktopRuntimeSecrets = await sessionStore.readRuntimeSecrets();
+
+  try {
+    await syncDesktopRuntimeSecretsToRealtime();
+  } catch (error) {
+    console.warn("Failed to sync runtime secrets during desktop startup.", error);
+  }
 
   registerHandlers();
 
@@ -1537,7 +2354,15 @@ app.whenReady().then(async () => {
   });
 
   autoStopController.on("stopRequested", (_sessionId: string, reason: SessionStopReason) => {
-    void stopSession(reason);
+    void (async () => {
+      const shouldStop = await confirmAutomaticSessionEnd(reason);
+      if (!shouldStop) {
+        autoStopController.dismissPendingStop();
+        return;
+      }
+
+      await stopSession(reason);
+    })();
   });
 
   await refreshCalendars();
@@ -1547,9 +2372,24 @@ app.whenReady().then(async () => {
   broadcastUpdaterState();
 });
 
+app.on("before-quit", () => {
+  isQuitting = true;
+  embeddedRealtimeProcess?.kill();
+  embeddedRealtimeProcess = null;
+});
+
+app.on("activate", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createControlWindow();
+    return;
+  }
+
+  showMainWindow();
+});
+
 app.on("window-all-closed", () => {
   closeMeetingWindow();
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" && isQuitting) {
     app.quit();
   }
 });

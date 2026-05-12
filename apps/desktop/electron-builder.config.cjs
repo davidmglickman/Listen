@@ -20,6 +20,13 @@ const config = {
     "dist/**/*",
     "package.json",
   ],
+  extraResources: [
+    {
+      from: "dist/apps/desktop/resources",
+      to: ".",
+      filter: ["**/*"],
+    },
+  ],
   win: {
     signAndEditExecutable: false,
     target: ["nsis"],

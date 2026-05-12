@@ -1,10 +1,15 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionQuestionAnswer } from "@listen/shared";
+import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionQuestionAnswer, SessionSummary } from "@listen/shared";
 
 type StateListener = (snapshot: AppSnapshot) => void;
 type RuntimeCapabilities = {
+  aiConfigured: boolean;
   cloudTranscriptionConfigured: boolean;
+};
+type RuntimeSecrets = {
+  aiApiKey: string;
+  transcriptionApiKey: string;
 };
 type UpdaterState = {
   enabled: boolean;
@@ -44,6 +49,19 @@ type MeetingSessionHistory = {
   note: string;
   sessions: RelatedMeetingSession[];
 };
+type MeetingDriveDocument = {
+  id: string;
+  title: string;
+  modifiedAt: string;
+  mimeType: string;
+  sourceUrl: string;
+  snippet: string;
+};
+type MeetingDriveHistory = {
+  status: "ready" | "not_connected" | "needs_reconnect" | "unavailable" | "error";
+  note: string;
+  documents: MeetingDriveDocument[];
+};
 type StoredMeetingLaunchContext = {
   cacheKey: string;
   context: MeetingContext;
@@ -55,12 +73,28 @@ type OrgDocumentInput = {
   sourceName?: string | null;
   mimeType?: string | null;
 };
+type ContextQuestionDocument = {
+  title: string;
+  content: string;
+  sourceUrl?: string | null;
+};
+type ContextQuestionPayload = {
+  question: string;
+  title: string;
+  summary?: SessionSummary | null;
+  context?: MeetingContext | null;
+  transcript?: SessionHistoryDetail["transcript"];
+  coaching?: SessionHistoryDetail["coaching"];
+  documents?: ContextQuestionDocument[];
+};
 
 type UpdaterListener = (state: UpdaterState) => void;
 
 contextBridge.exposeInMainWorld("listenBridge", {
   getSnapshot: (): Promise<AppSnapshot> => ipcRenderer.invoke("app:get-snapshot"),
   getRuntimeCapabilities: (): Promise<RuntimeCapabilities> => ipcRenderer.invoke("app:get-runtime-capabilities"),
+  getRuntimeSecrets: (): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:get"),
+  saveRuntimeSecrets: (secrets: RuntimeSecrets): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:save", secrets),
   getUpdaterState: (): Promise<UpdaterState> => ipcRenderer.invoke("updater:get-state"),
   checkForUpdates: (): Promise<UpdaterState> => ipcRenderer.invoke("updater:check"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("updater:install"),
@@ -75,6 +109,7 @@ contextBridge.exposeInMainWorld("listenBridge", {
     ipcRenderer.invoke("meeting-templates:save", template),
   deleteMeetingTemplate: (templateId: string): Promise<void> => ipcRenderer.invoke("meeting-templates:delete", templateId),
   askSessionQuestion: (question: string, sessionId?: string | null): Promise<SessionQuestionAnswer> => ipcRenderer.invoke("session:ask-question", question, sessionId),
+  askContextQuestion: (payload: ContextQuestionPayload): Promise<SessionQuestionAnswer> => ipcRenderer.invoke("context:ask-question", payload),
   listSessions: (limit = 20): Promise<SessionHistoryItem[]> => ipcRenderer.invoke("session:list", limit),
   getSession: (sessionId: string): Promise<SessionHistoryDetail> => ipcRenderer.invoke("session:get", sessionId),
   refreshCalendars: (): Promise<AppSnapshot> => ipcRenderer.invoke("calendar:refresh"),
@@ -86,11 +121,14 @@ contextBridge.exposeInMainWorld("listenBridge", {
     ipcRenderer.invoke("meeting:launch-context:save", meetingId, payload),
   getMeetingEmailHistory: (meetingId: string): Promise<MeetingEmailHistory> => ipcRenderer.invoke("meeting:email-history", meetingId),
   getMeetingSessionHistory: (meetingId: string): Promise<MeetingSessionHistory> => ipcRenderer.invoke("meeting:session-history", meetingId),
+  getMeetingDriveHistory: (meetingId: string): Promise<MeetingDriveHistory> => ipcRenderer.invoke("meeting:drive-history", meetingId),
   connectCalendar: (provider: "google" | "microsoft"): Promise<AppSnapshot> => ipcRenderer.invoke("calendar:connect", provider),
   disconnectCalendar: (provider: "google" | "microsoft"): Promise<AppSnapshot> => ipcRenderer.invoke("calendar:disconnect", provider),
   createMockMeeting: (): Promise<AppSnapshot> => ipcRenderer.invoke("calendar:create-mock-meeting"),
   launchMeeting: (meetingId: string, meetingContext: MeetingContext | null): Promise<AppSnapshot> =>
     ipcRenderer.invoke("meeting:launch", meetingId, meetingContext),
+  autoStartMeeting: (meetingId: string | null, meetingContext: MeetingContext | null): Promise<AppSnapshot> =>
+    ipcRenderer.invoke("meeting:auto-start", meetingId, meetingContext),
   dismissPopup: (): Promise<AppSnapshot> => ipcRenderer.invoke("meeting:dismiss-popup"),
   sendDebugTranscript: (source: AudioSourceKind, text: string): Promise<AppSnapshot> =>
     ipcRenderer.invoke("session:debug-transcript", source, text),
@@ -123,6 +161,8 @@ declare global {
     listenBridge: {
       getSnapshot(): Promise<AppSnapshot>;
       getRuntimeCapabilities(): Promise<RuntimeCapabilities>;
+      getRuntimeSecrets(): Promise<RuntimeSecrets>;
+      saveRuntimeSecrets(secrets: RuntimeSecrets): Promise<RuntimeSecrets>;
       getUpdaterState(): Promise<UpdaterState>;
       checkForUpdates(): Promise<UpdaterState>;
       installUpdate(): Promise<void>;
@@ -135,6 +175,7 @@ declare global {
       saveMeetingTemplate(template: { id?: string; title: string; context: MeetingContext }): Promise<MeetingContextTemplate>;
       deleteMeetingTemplate(templateId: string): Promise<void>;
       askSessionQuestion(question: string, sessionId?: string | null): Promise<SessionQuestionAnswer>;
+      askContextQuestion(payload: ContextQuestionPayload): Promise<SessionQuestionAnswer>;
       listSessions(limit?: number): Promise<SessionHistoryItem[]>;
       getSession(sessionId: string): Promise<SessionHistoryDetail>;
       refreshCalendars(): Promise<AppSnapshot>;
@@ -144,10 +185,12 @@ declare global {
       saveMeetingLaunchContext(meetingId: string, payload: StoredMeetingLaunchContext): Promise<StoredMeetingLaunchContext>;
       getMeetingEmailHistory(meetingId: string): Promise<MeetingEmailHistory>;
       getMeetingSessionHistory(meetingId: string): Promise<MeetingSessionHistory>;
+      getMeetingDriveHistory(meetingId: string): Promise<MeetingDriveHistory>;
       connectCalendar(provider: "google" | "microsoft"): Promise<AppSnapshot>;
       disconnectCalendar(provider: "google" | "microsoft"): Promise<AppSnapshot>;
       createMockMeeting(): Promise<AppSnapshot>;
       launchMeeting(meetingId: string, meetingContext: MeetingContext | null): Promise<AppSnapshot>;
+      autoStartMeeting(meetingId: string | null, meetingContext: MeetingContext | null): Promise<AppSnapshot>;
       dismissPopup(): Promise<AppSnapshot>;
       sendDebugTranscript(source: AudioSourceKind, text: string): Promise<AppSnapshot>;
       sendAudioChunk(source: AudioSourceKind, payloadBase64: string, sampleRate: number): void;

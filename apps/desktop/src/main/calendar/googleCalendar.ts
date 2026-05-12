@@ -6,6 +6,11 @@ import type { StoredOAuthToken } from "../storage/sessionStore";
 import { fetchWithTimeout } from "../http/fetchWithTimeout";
 import { extractMeetingLink, parseMeetingLink } from "./meetingLinkParser";
 
+const genericMeetingLink = {
+  provider: "generic",
+  launchStrategy: "browser",
+} as const;
+
 interface GoogleCalendarDateTime {
   date?: string;
   dateTime?: string;
@@ -78,9 +83,9 @@ export class GoogleCalendarProvider {
 
   async getUpcomingMeetings(accessToken: string): Promise<MeetingRecord[]> {
     const timeMin = new Date().toISOString();
-    const timeMax = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+    const timeMax = new Date(Date.now() + 14 * 24 * 60 * 60_000).toISOString();
     const calendarId = encodeURIComponent(this.calendarId);
-    const endpoint = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&maxResults=25`;
+    const endpoint = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&maxResults=100`;
     const response = await fetchWithTimeout(endpoint, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -94,16 +99,16 @@ export class GoogleCalendarProvider {
     const payload = (await response.json()) as GoogleCalendarResponse;
     return (payload.items ?? [])
       .map((event) => {
-        const joinUrl = extractMeetingLink(event.hangoutLink, event.location, event.description);
+        const joinUrl = extractMeetingLink(event.hangoutLink, event.location, event.description) ?? "";
         const startsAt = toIsoString(event.start);
         const endsAt = toIsoString(event.end);
-        if (!joinUrl || !startsAt || !endsAt) {
+        if (!startsAt || !endsAt) {
           return null;
         }
 
-        const parsed = parseMeetingLink(joinUrl);
+        const parsed = joinUrl ? parseMeetingLink(joinUrl) : genericMeetingLink;
         return {
-          id: `google-${event.id}-${createHash("sha1").update(joinUrl).digest("hex").slice(0, 8)}`,
+          id: `google-${event.id}-${createHash("sha1").update(joinUrl || `${startsAt}-${endsAt}`).digest("hex").slice(0, 8)}`,
           externalId: event.id,
           title: event.summary?.trim() || "Google Calendar meeting",
           startsAt,

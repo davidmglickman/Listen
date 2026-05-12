@@ -16,11 +16,14 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import { detectCoachingPrompts } from "./coaching/rules";
 import { HistoryStore } from "./history/historyStore";
-import { answerSessionQuestion } from "./qa/answerSessionQuestion";
+import { answerSessionQuestion, type QuestionContextDocument } from "./qa/answerSessionQuestion";
 import { createResearchProvider } from "./research/provider";
 import { ResearchWorker } from "./research/worker";
 import { createSupabaseAdminClient } from "./supabase/client";
 import { SupabaseSyncService } from "./supabase/syncService";
+import { buildConversationTopics } from "./conversation/topics";
+import { buildConversationTurns } from "./conversation/turns";
+import { getRuntimeSecretCapabilities, replacePersistedRuntimeSecrets } from "./runtime/runtimeSecrets";
 import { RollingSessionState } from "./state/sessionState";
 import { createStreamingTranscriptionProvider } from "./transcription/streamingProvider";
 
@@ -36,13 +39,16 @@ function resolveEnvPath(): string | undefined {
 
 dotenv.config({ path: resolveEnvPath() });
 
-const port = Number(process.env.LISTEN_REALTIME_PORT ?? 8787);
+const port = Number(process.env.PORT ?? process.env.LISTEN_REALTIME_PORT ?? 8787);
+const host = process.env.HOST?.trim() || "0.0.0.0";
+const publicBaseUrl = process.env.LISTEN_PUBLIC_BASE_URL?.trim() || `http://localhost:${port}`;
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 const transcriptionProvider = createStreamingTranscriptionProvider();
 const sessions = new Map<string, RollingSessionState>();
 const historyStore = new HistoryStore(process.env.LISTEN_DB_PATH?.trim() || path.resolve(process.cwd(), "data", "listen.db"));
+replacePersistedRuntimeSecrets(historyStore.readRuntimeSecrets());
 const webAppDir = path.resolve(process.cwd(), "apps", "web");
 const supabaseSyncService = new SupabaseSyncService(
   createSupabaseAdminClient(),
@@ -56,6 +62,36 @@ const researchWorker = new ResearchWorker(
 
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : (value ?? "");
+}
+
+function normalizeQuestionContextDocuments(value: unknown): QuestionContextDocument[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.reduce((documents, document) => {
+    if (!document || typeof document !== "object") {
+      return documents;
+    }
+
+    const candidate = document as {
+      title?: unknown;
+      content?: unknown;
+      sourceUrl?: unknown;
+    };
+    const title = typeof candidate.title === "string" ? candidate.title.trim() : "";
+    const content = typeof candidate.content === "string" ? candidate.content.trim() : "";
+    if (!title || !content) {
+      return documents;
+    }
+
+    documents.push({
+      title,
+      content,
+      sourceUrl: typeof candidate.sourceUrl === "string" && candidate.sourceUrl.trim() ? candidate.sourceUrl.trim() : null,
+    });
+    return documents;
+  }, [] as QuestionContextDocument[]);
 }
 
 async function publishTranscript(ws: WebSocket, sessionState: RollingSessionState, segment: TranscriptSegment): Promise<void> {
@@ -102,7 +138,30 @@ app.get("/", (_request: Request, response: Response) => {
   response.redirect("/app/");
 });
 app.get("/health", (_request: Request, response: Response) => {
-  response.json({ ok: true, sessions: sessions.size, supabaseConfigured: supabaseSyncService.isConfigured() });
+  const runtimeSecrets = getRuntimeSecretCapabilities();
+  response.json({
+    ok: true,
+    sessions: sessions.size,
+    supabaseConfigured: supabaseSyncService.isConfigured(),
+    aiConfigured: runtimeSecrets.aiConfigured,
+    transcriptionConfigured: runtimeSecrets.transcriptionConfigured,
+    publicBaseUrl,
+    websocketUrl: `${publicBaseUrl.replace(/^http/i, "ws")}/ws`,
+  });
+});
+app.put("/api/runtime/secrets", (request: Request, response: Response) => {
+  const aiApiKey = typeof request.body?.aiApiKey === "string" ? request.body.aiApiKey : "";
+  const deepgramApiKey = typeof request.body?.deepgramApiKey === "string" ? request.body.deepgramApiKey : "";
+  const secrets = historyStore.writeRuntimeSecrets({
+    aiApiKey: aiApiKey.trim() || null,
+    deepgramApiKey: deepgramApiKey.trim() || null,
+  });
+
+  replacePersistedRuntimeSecrets(secrets);
+  response.json({
+    aiConfigured: Boolean(secrets.aiApiKey),
+    transcriptionConfigured: Boolean(secrets.deepgramApiKey),
+  });
 });
 app.get("/api/admin/supabase/status", (_request: Request, response: Response) => {
   response.json({
@@ -222,6 +281,55 @@ app.post("/api/live-sessions/:sessionId/questions", async (request: Request, res
     response.status(500).json({ error: error instanceof Error ? error.message : "Live session Q&A failed." });
   }
 });
+app.get("/api/live-sessions/:sessionId/debug", (request: Request, response: Response) => {
+  const sessionState = sessions.get(getRouteParam(request.params.sessionId));
+  if (!sessionState) {
+    response.status(404).json({ error: "Active session not found." });
+    return;
+  }
+
+  const transcript = sessionState.getTranscript();
+  response.json({
+    sessionId: sessionState.sessionId,
+    meetingId: sessionState.meetingId,
+    transcriptCount: transcript.length,
+    promptCount: sessionState.getPrompts().length,
+    turns: buildConversationTurns(transcript),
+    topics: buildConversationTopics(transcript),
+    speakerResolution: sessionState.getSpeakerResolutionTraces(),
+  });
+});
+app.post("/api/questions/context", async (request: Request, response: Response) => {
+  if (typeof request.body?.question !== "string" || !request.body.question.trim()) {
+    response.status(400).json({ error: "Question is required." });
+    return;
+  }
+
+  if (typeof request.body?.title !== "string" || !request.body.title.trim()) {
+    response.status(400).json({ error: "Context title is required." });
+    return;
+  }
+
+  const extraDocuments = normalizeQuestionContextDocuments(request.body?.documents);
+
+  try {
+    const answer = await answerSessionQuestion({
+      question: request.body.question.trim(),
+      session: {
+        meetingTitle: request.body.title.trim(),
+        summary: request.body?.summary ?? null,
+        context: request.body?.context ?? null,
+        transcript: Array.isArray(request.body?.transcript) ? request.body.transcript : [],
+        coaching: Array.isArray(request.body?.coaching) ? request.body.coaching : [],
+      },
+      guidance: historyStore.getCoachingGuidance("self"),
+      documents: [...extraDocuments, ...historyStore.listOrgContextDocuments()],
+    });
+    response.json(answer);
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Context Q&A failed." });
+  }
+});
 app.get("/api/context", (_request: Request, response: Response) => {
   response.json({
     profiles: historyStore.listCoachingProfiles(),
@@ -326,7 +434,9 @@ wss.on("connection", (ws: WebSocket) => {
         historyStore.getCoachingGuidance(),
       );
       sessions.set(event.sessionId, sessionState);
-      await transcriptionProvider.startSession(event.sessionId, async (providerSegment) => {
+      await transcriptionProvider.startSession(
+        event.sessionId,
+        async (providerSegment) => {
         const latestState = sessions.get(event.sessionId);
         if (!latestState) {
           return;
@@ -343,7 +453,15 @@ wss.on("connection", (ws: WebSocket) => {
           createdAt: providerSegment.createdAt,
         };
         await publishTranscript(ws, latestState, segment);
-      });
+        },
+        {
+          attendees: event.attendees,
+          onTrace: (trace) => {
+            const latestState = sessions.get(event.sessionId);
+            latestState?.appendSpeakerResolutionTrace(trace);
+          },
+        },
+      );
       return;
     }
 
@@ -362,8 +480,8 @@ wss.on("connection", (ws: WebSocket) => {
         id: randomUUID(),
         sessionId: event.sessionId,
         source: event.source,
-        speakerId: event.source === "microphone" ? null : undefined,
-        speakerLabel: event.source === "microphone" ? "You" : null,
+        speakerId: event.speakerId ?? (event.source === "microphone" ? null : undefined),
+        speakerLabel: event.speakerLabel ?? (event.source === "microphone" ? "You" : null),
         text: event.text,
         isFinal: true,
         createdAt: event.createdAt,
@@ -392,7 +510,7 @@ wss.on("connection", (ws: WebSocket) => {
   });
 });
 
-server.listen(port, () => {
+server.listen(port, host, () => {
   researchWorker.start();
-  console.log(`Listen realtime service running on http://localhost:${port}`);
+  console.log(`Listen realtime service running on ${publicBaseUrl}`);
 });

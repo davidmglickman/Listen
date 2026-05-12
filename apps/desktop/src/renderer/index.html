@@ -207,6 +207,24 @@
         background: var(--surface-muted);
       }
 
+      button.is-loading {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      button.is-loading::before {
+        content: "";
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        border: 2px solid rgba(17, 24, 39, 0.18);
+        border-top-color: currentColor;
+        flex: 0 0 auto;
+        animation: updater-spin 720ms linear infinite;
+      }
+
       button:disabled {
         opacity: 0.6;
         cursor: not-allowed;
@@ -1189,6 +1207,33 @@
         flex: 1 1 320px;
       }
 
+      .updater-status-copy {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 20px;
+      }
+
+      .updater-status-spinner {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        border: 2px solid rgba(37, 99, 235, 0.18);
+        border-top-color: var(--accent);
+        flex: 0 0 auto;
+        animation: updater-spin 720ms linear infinite;
+      }
+
+      @keyframes updater-spin {
+        from {
+          transform: rotate(0deg);
+        }
+
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
       .setup-check-indicator {
         display: inline-flex;
         align-items: center;
@@ -1660,6 +1705,7 @@
                 <p class="muted">Prospect, organization, attendee, and source context for the selected meeting.</p>
               </div>
               <div id="selected-meeting-research" class="research-scroll"></div>
+              <div id="selected-meeting-research-qa" class="card review-qa-card"></div>
             </div>
             <div id="prep-panel-history" class="workspace-panel">
               <div>
@@ -1667,6 +1713,7 @@
                 <p class="muted">Email history and prior Listen sessions related to the selected meeting.</p>
               </div>
               <div id="selected-meeting-history" class="research-scroll"></div>
+              <div id="selected-meeting-history-qa" class="card review-qa-card"></div>
             </div>
           </div>
         </div>
@@ -1777,7 +1824,7 @@
                 <div class="field-grid">
                   <label>
                     Search
-                    <input id="review-search-query" placeholder="Search title, headline, type, or goal" />
+                    <input id="review-search-query" placeholder="Search title, headline, notes, or transcript" />
                   </label>
                   <label>
                     Call function
@@ -1800,8 +1847,8 @@
                 <div id="review-session-detail" class="card review-focus-card"></div>
                 <div class="card review-qa-card">
                   <div>
-                    <h2>Ask About This Call</h2>
-                    <p class="muted">Query the selected saved session using its transcript, coaching trail, and stored context.</p>
+                    <h2>Ask About This Context</h2>
+                    <p class="muted">Query the selected saved call or document using all stored context we have for it.</p>
                   </div>
                   <div id="session-qa"></div>
                 </div>
@@ -1841,6 +1888,23 @@
                     <p class="muted">Connect calendars once, then mostly return to the Meetings page.</p>
                   </div>
                   <div id="connections" class="stack"></div>
+                  <div class="card stack">
+                    <div>
+                      <h3>API Keys</h3>
+                      <p class="muted">Stored locally on this computer. Users must provide their own AI and transcription keys during setup.</p>
+                    </div>
+                    <div class="field-grid">
+                      <label>
+                        AI API key
+                        <input id="runtime-ai-api-key" type="password" placeholder="sk-..." autocomplete="off" />
+                      </label>
+                      <label>
+                        Transcription API key
+                        <input id="runtime-transcription-api-key" type="password" placeholder="deepgram key" autocomplete="off" />
+                      </label>
+                    </div>
+                    <button id="save-runtime-secrets" class="secondary">Save API Keys</button>
+                  </div>
                 </div>
                 <div id="setup-panel-coaching" class="workspace-panel">
                   <div>
@@ -1966,7 +2030,12 @@
       const state = {
         snapshot: null,
         runtimeCapabilities: {
+          aiConfigured: false,
           cloudTranscriptionConfigured: false,
+        },
+        runtimeSecrets: {
+          aiApiKey: "",
+          transcriptionApiKey: "",
         },
         updater: {
           enabled: false,
@@ -1995,6 +2064,11 @@
             pending: false,
             pendingQuestion: "",
           },
+          prep: {
+            history: [],
+            pending: false,
+            pendingQuestion: "",
+          },
           review: {
             history: [],
             pending: false,
@@ -2012,15 +2086,23 @@
         meetingLaunchContexts: {},
         meetingEmailHistory: {},
         meetingSessionHistory: {},
+        meetingDriveHistory: {},
         reviewSessions: {
           status: "idle",
           note: "",
           items: [],
         },
         selectedReviewSessionId: null,
+        selectedReviewDocumentId: null,
         reviewSessionDetails: {},
         currentPage: "today",
         lastAutoPage: "today",
+      };
+      const minimumUpdaterCheckingDurationMs = 1000;
+      const updaterVisualState = {
+        checkingStartedAt: null,
+        pendingState: null,
+        timeoutId: null,
       };
       const captureState = {
         sessionId: null,
@@ -2035,6 +2117,23 @@
         shouldRestart: false,
         activationTimeoutId: null,
       };
+      const backgroundMicMonitorState = {
+        stream: null,
+        audioContext: null,
+        mediaSource: null,
+        analyser: null,
+        intervalId: null,
+        armedAt: null,
+        candidateMeetingId: null,
+        triggerPending: false,
+        permissionDenied: false,
+        lastTriggeredAt: 0,
+      };
+      const BACKGROUND_AUTO_START_RMS_THRESHOLD = 0.035;
+      const BACKGROUND_AUTO_START_SUSTAIN_MS = 4000;
+      const BACKGROUND_AUTO_START_POLL_MS = 1000;
+      const BACKGROUND_AUTO_START_COOLDOWN_MS = 120000;
+      const BACKGROUND_AUTO_START_LEAD_MS = 10 * 60 * 1000;
 
       const layoutEl = document.getElementById("app-layout");
       const sidebarToggleEl = document.getElementById("sidebar-toggle");
@@ -2042,6 +2141,9 @@
     const updaterStatusEl = document.getElementById("updater-status");
     const checkForUpdatesButtonEl = document.getElementById("check-for-updates");
     const connectionsEl = document.getElementById("connections");
+      const runtimeAiApiKeyEl = document.getElementById("runtime-ai-api-key");
+      const runtimeTranscriptionApiKeyEl = document.getElementById("runtime-transcription-api-key");
+      const saveRuntimeSecretsButtonEl = document.getElementById("save-runtime-secrets");
       const navButtons = Array.from(document.querySelectorAll("[data-page].nav-button"));
   const prepTabButtons = Array.from(document.querySelectorAll("[data-prep-tab]"));
       const setupTabButtons = Array.from(document.querySelectorAll("[data-setup-tab]"));
@@ -2053,7 +2155,9 @@
       const selectedMeetingTitleEl = document.getElementById("selected-meeting-title");
       const selectedMeetingMetaEl = document.getElementById("selected-meeting-meta");
       const selectedMeetingResearchEl = document.getElementById("selected-meeting-research");
-  const selectedMeetingHistoryEl = document.getElementById("selected-meeting-history");
+        const selectedMeetingHistoryEl = document.getElementById("selected-meeting-history");
+        const selectedMeetingResearchQaEl = document.getElementById("selected-meeting-research-qa");
+        const selectedMeetingHistoryQaEl = document.getElementById("selected-meeting-history-qa");
       const popupEl = document.getElementById("popup");
       const activeSessionEl = document.getElementById("active-session");
       const activeCallShellEl = document.getElementById("active-call-shell");
@@ -2114,6 +2218,32 @@
         };
       }
 
+      function createEmptySnapshot() {
+        return {
+          calendarConnections: [],
+          upcomingMeetings: [],
+          pendingPopupMeeting: null,
+          activeSession: null,
+          captureHealth: {
+            microphone: {
+              status: "idle",
+              detail: "Microphone capture idle.",
+              chunkCount: 0,
+              lastActivityAt: null,
+            },
+            system: {
+              status: "idle",
+              detail: "System audio capture idle.",
+              chunkCount: 0,
+              lastActivityAt: null,
+            },
+          },
+          transcript: [],
+          coaching: [],
+          lastSummary: null,
+        };
+      }
+
       function escapeHtml(value) {
         return String(value ?? "")
           .replace(/&/g, "&amp;")
@@ -2144,6 +2274,13 @@
         activeCallHeaderEl.classList.toggle("hidden", !expanded);
         toggleActiveCallDetailsButtonEl.textContent = expanded ? "Hide Call Details" : "Show Call Details";
         toggleActiveCallDetailsButtonEl.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+
+      function resetQaThread(panelKey) {
+        const qaState = state.sessionQa[panelKey];
+        qaState.history = [];
+        qaState.pending = false;
+        qaState.pendingQuestion = "";
       }
 
       function setSidebarCollapsed(collapsed) {
@@ -2257,16 +2394,98 @@
         }
       }
 
+      let reviewSearchHydrationInFlight = false;
+
+      function buildTranscriptSearchText(transcript = []) {
+        return transcript
+          .map((segment) => `${segment.speakerLabel || segment.source || "speaker"} ${segment.text || ""}`.trim())
+          .filter(Boolean)
+          .join(" ");
+      }
+
+      function buildReviewSessionSearchText(session) {
+        const detail = state.reviewSessionDetails[session.sessionId]?.detail;
+        const context = detail?.context || session.context;
+        const summary = detail?.summary || session.summary;
+
+        return [
+          session.meetingTitle,
+          summary?.headline,
+          context?.callFunction,
+          context?.callType,
+          context?.callGoal,
+          context?.userRole,
+          context?.guestRole,
+          context?.desiredOutcome,
+          context?.notes,
+          ...(summary?.decisions || []),
+          ...(summary?.actionItems || []),
+          ...(summary?.openQuestions || []),
+          buildTranscriptSearchText(detail?.transcript || []),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+      }
+
+      function buildReviewDocumentSearchText(document) {
+        return [document.title, document.sourceName, document.sourceUrl, document.content]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+      }
+
+      async function hydrateReviewSearchDetails() {
+        const query = reviewSearchQueryEl?.value.trim() || "";
+        if (query.length < 3 || reviewSearchHydrationInFlight || state.reviewSessions.status !== "ready") {
+          return;
+        }
+
+        const missingSessionIds = state.reviewSessions.items
+          .filter((session) => {
+            const detailState = state.reviewSessionDetails[session.sessionId];
+            return !detailState || detailState.status === "idle";
+          })
+          .map((session) => session.sessionId);
+
+        if (!missingSessionIds.length) {
+          return;
+        }
+
+        reviewSearchHydrationInFlight = true;
+        try {
+          await Promise.all(missingSessionIds.map(async (sessionId) => {
+            try {
+              const detail = await window.listenBridge.getSession(sessionId);
+              state.reviewSessionDetails[sessionId] = {
+                status: "ready",
+                note: "",
+                detail,
+              };
+            } catch (error) {
+              state.reviewSessionDetails[sessionId] = {
+                status: "error",
+                note: error instanceof Error ? error.message : String(error),
+                detail: null,
+              };
+            }
+          }));
+        } finally {
+          reviewSearchHydrationInFlight = false;
+        }
+
+        renderReviewWorkspace(state.snapshot);
+        renderSessionQa(state.snapshot);
+        await syncReviewFilterSelection();
+      }
+
       function getFilteredReviewSessions() {
         const query = reviewSearchQueryEl.value.trim().toLowerCase();
         const callFunction = reviewSearchFunctionEl.value;
         const date = reviewSearchDateEl.value;
 
         return state.reviewSessions.items.filter((session) => {
-          const haystack = [session.meetingTitle, session.summary?.headline, session.context?.callType, session.context?.callGoal]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
+          const haystack = buildReviewSessionSearchText(session);
           const matchesQuery = !query || haystack.includes(query);
           const matchesFunction = !callFunction || session.context?.callFunction === callFunction;
           const matchesDate = !date || String(session.completedAt || "").startsWith(date);
@@ -2274,20 +2493,51 @@
         });
       }
 
+      function getFilteredReviewDocuments() {
+        const query = reviewSearchQueryEl.value.trim().toLowerCase();
+        const date = reviewSearchDateEl.value;
+
+        return state.orgDocuments.filter((document) => {
+          const haystack = buildReviewDocumentSearchText(document);
+          const matchesQuery = !query || haystack.includes(query);
+          const matchesDate = !date || String(document.updatedAt || "").startsWith(date);
+          return matchesQuery && matchesDate;
+        });
+      }
+
       function getSelectedReviewSession(items = state.reviewSessions.items) {
         return items.find((item) => item.sessionId === state.selectedReviewSessionId) || null;
       }
 
+      function getSelectedReviewDocument(items = state.orgDocuments) {
+        return items.find((item) => item.id === state.selectedReviewDocumentId) || null;
+      }
+
       async function syncReviewFilterSelection() {
         const filteredItems = getFilteredReviewSessions();
+        const filteredDocuments = getFilteredReviewDocuments();
         const currentVisible = state.selectedReviewSessionId && filteredItems.some((item) => item.sessionId === state.selectedReviewSessionId);
         if (currentVisible) {
+          state.selectedReviewDocumentId = null;
           renderReviewWorkspace(state.snapshot);
           renderSessionQa(state.snapshot);
           return;
         }
 
-        await selectReviewSession(filteredItems[0]?.sessionId || null, { preserveQuestion: false });
+        const currentDocumentVisible = state.selectedReviewDocumentId && filteredDocuments.some((item) => item.id === state.selectedReviewDocumentId);
+        if (currentDocumentVisible) {
+          state.selectedReviewSessionId = null;
+          renderReviewWorkspace(state.snapshot);
+          renderSessionQa(state.snapshot);
+          return;
+        }
+
+        if (filteredItems.length) {
+          await selectReviewSession(filteredItems[0]?.sessionId || null, { preserveQuestion: false });
+          return;
+        }
+
+        selectReviewDocument(filteredDocuments[0]?.id || null);
       }
 
       async function loadReviewSessions(options = {}) {
@@ -2304,7 +2554,7 @@
         renderReviewWorkspace(state.snapshot);
 
         try {
-          const items = await window.listenBridge.listSessions(20);
+          const items = await window.listenBridge.listSessions(100);
           state.reviewSessions = {
             status: "ready",
             note: items.length ? "Recent calls captured by Listen." : "No saved calls yet. Finish one call and it will appear here.",
@@ -2316,6 +2566,9 @@
             const preferredSessionId = state.snapshot?.lastSummary?.sessionId;
             const nextSessionId = items.find((item) => item.sessionId === preferredSessionId)?.sessionId || items[0]?.sessionId || null;
             state.selectedReviewSessionId = nextSessionId;
+            if (nextSessionId) {
+              state.selectedReviewDocumentId = null;
+            }
           }
 
           if (state.selectedReviewSessionId) {
@@ -2375,21 +2628,29 @@
         const { preserveQuestion = true } = options;
         if (!sessionId) {
           state.selectedReviewSessionId = null;
+          resetQaThread("review");
           renderReviewWorkspace(state.snapshot);
           renderSessionQa(state.snapshot);
           return;
         }
 
         state.selectedReviewSessionId = sessionId;
-        state.sessionQa.review.answer = null;
-        state.sessionQa.review.error = "";
-        state.sessionQa.review.pending = false;
+        state.selectedReviewDocumentId = null;
+        resetQaThread("review");
         if (!preserveQuestion) {
-          state.sessionQa.review.question = "";
+          state.sessionQa.review.pendingQuestion = "";
         }
         renderReviewWorkspace(state.snapshot);
         renderSessionQa(state.snapshot);
         await loadReviewSessionDetail(sessionId);
+      }
+
+      function selectReviewDocument(documentId) {
+        state.selectedReviewDocumentId = documentId;
+        state.selectedReviewSessionId = null;
+        resetQaThread("review");
+        renderReviewWorkspace(state.snapshot);
+        renderSessionQa(state.snapshot);
       }
 
       function ensureReviewData(snapshot) {
@@ -2461,6 +2722,12 @@
         coachingStyleEl.value = preferences.settings?.style || "supportive";
         coachingDirectnessEl.value = preferences.settings?.directness || "balanced";
         coachingFrequencyEl.value = preferences.settings?.frequency || "balanced";
+      }
+
+      function applyRuntimeSecrets(secrets) {
+        state.runtimeSecrets = secrets;
+        runtimeAiApiKeyEl.value = secrets.aiApiKey || "";
+        runtimeTranscriptionApiKeyEl.value = secrets.transcriptionApiKey || "";
       }
 
       function applyMeetingContext(context) {
@@ -2581,6 +2848,8 @@
         ].join("");
 
         applyMeetingTemplateButtonEl.disabled = !state.selectedMeetingId || !state.selectedMeetingTemplateId;
+        launchMeetingFromBriefButtonEl.disabled = !state.selectedMeetingId
+          || !state.snapshot?.upcomingMeetings?.some((meeting) => meeting.id === state.selectedMeetingId && meeting.joinUrl);
       }
 
       function buildMeetingTemplateContext() {
@@ -2696,11 +2965,17 @@
         const connectedCalendars = snapshot.calendarConnections.filter((connection) => connection.provider !== "mock" && connection.connected).length;
         const hasOrgDocs = state.orgDocuments.length > 0;
         const hasTemplates = state.meetingTemplates.length > 0;
+        const hasApiKeys = state.runtimeCapabilities.aiConfigured && state.runtimeCapabilities.cloudTranscriptionConfigured;
         setupOverviewEl.innerHTML = [
           {
             title: "Connect calendar",
             detail: connectedCalendars ? `Connected accounts: ${connectedCalendars}` : "Connect Google or Microsoft so meetings sync automatically.",
             complete: connectedCalendars > 0,
+          },
+          {
+            title: "Add AI and transcription keys",
+            detail: hasApiKeys ? "Both API keys are saved for this user." : "Enter your own AI and transcription keys so packaged builds never ship shared secrets.",
+            complete: hasApiKeys,
           },
           {
             title: "Set coaching defaults",
@@ -2747,13 +3022,60 @@
         return "Check for Updates";
       }
 
+      function clearPendingUpdaterVisualState() {
+        updaterVisualState.checkingStartedAt = null;
+        updaterVisualState.pendingState = null;
+        if (updaterVisualState.timeoutId) {
+          clearTimeout(updaterVisualState.timeoutId);
+          updaterVisualState.timeoutId = null;
+        }
+      }
+
+      function applyUpdaterState(nextUpdaterState) {
+        if (nextUpdaterState.availability === "checking") {
+          clearPendingUpdaterVisualState();
+          updaterVisualState.checkingStartedAt = Date.now();
+          state.updater = nextUpdaterState;
+          renderUpdaterStatus();
+          return;
+        }
+
+        if (updaterVisualState.checkingStartedAt && state.updater.availability === "checking") {
+          const remainingDelay = minimumUpdaterCheckingDurationMs - (Date.now() - updaterVisualState.checkingStartedAt);
+          if (remainingDelay > 0) {
+            updaterVisualState.pendingState = nextUpdaterState;
+            if (updaterVisualState.timeoutId) {
+              clearTimeout(updaterVisualState.timeoutId);
+            }
+            updaterVisualState.timeoutId = setTimeout(() => {
+              const pendingState = updaterVisualState.pendingState;
+              clearPendingUpdaterVisualState();
+              if (pendingState) {
+                state.updater = pendingState;
+                renderUpdaterStatus();
+              }
+            }, remainingDelay);
+            return;
+          }
+        }
+
+        clearPendingUpdaterVisualState();
+        state.updater = nextUpdaterState;
+        renderUpdaterStatus();
+      }
+
       function renderUpdaterStatus() {
+        const isChecking = state.updater.availability === "checking";
         const versionLine = state.updater.availableVersion
           ? `Current ${escapeHtml(state.updater.currentVersion)} · Latest ${escapeHtml(state.updater.availableVersion)}`
           : `Current ${escapeHtml(state.updater.currentVersion)}`;
         const checkedLine = state.updater.checkedAt ? ` · Checked ${escapeHtml(formatDate(state.updater.checkedAt))}` : "";
-        updaterStatusEl.innerHTML = `${escapeHtml(state.updater.message)}<br>${versionLine}${checkedLine}`;
+        updaterStatusEl.innerHTML = [
+          `<span class="updater-status-copy">${isChecking ? '<span class="updater-status-spinner" aria-hidden="true"></span>' : ""}<span>${escapeHtml(state.updater.message)}</span></span>`,
+          `${versionLine}${checkedLine}`,
+        ].join("<br>");
         checkForUpdatesButtonEl.textContent = getUpdaterActionLabel();
+        checkForUpdatesButtonEl.classList.toggle("is-loading", isChecking);
         checkForUpdatesButtonEl.disabled = state.updater.availability === "checking" || state.updater.availability === "downloading";
       }
 
@@ -2813,14 +3135,6 @@
 
         if (meeting.notes && clipContextText(meeting.notes, 280)) {
           lines.push(`Calendar notes: ${clipContextText(meeting.notes, 280)}`);
-        }
-
-        if (baseContext?.callGoal) {
-          lines.push(`Call goal: ${clipContextText(baseContext.callGoal, 180)}`);
-        }
-
-        if (baseContext?.desiredOutcome) {
-          lines.push(`Desired outcome: ${clipContextText(baseContext.desiredOutcome, 180)}`);
         }
 
         return lines.join("\n");
@@ -2888,6 +3202,23 @@
         return sessions ? `Related prior meetings:\n${sessions}` : "";
       }
 
+      function buildDriveHistoryContextBlock(driveHistory) {
+        if (!driveHistory || driveHistory.status !== "ready" || !driveHistory.documents?.length) {
+          return "";
+        }
+
+        const documents = driveHistory.documents
+          .slice(0, 5)
+          .map((document) => {
+            const title = clipContextText(document.title, 120);
+            const snippet = clipContextText(document.snippet, 220);
+            return `- ${title}${snippet ? `: ${snippet}` : ""}`;
+          })
+          .join("\n");
+
+        return documents ? `Google Drive transcripts:\n${documents}` : "";
+      }
+
       function buildCombinedMeetingContextNotes(meeting, baseContext, emailHistory, sessionHistory) {
         const sections = [];
         const userNotes = clipContextText(baseContext?.notes, 600);
@@ -2917,6 +3248,89 @@
         }
 
         return sections.join("\n\n").trim();
+      }
+
+      function createQuestionContextDocument(title, content, sourceUrl = null) {
+        const normalizedTitle = String(title || "").trim();
+        const normalizedContent = String(content || "").trim();
+        if (!normalizedTitle || !normalizedContent) {
+          return null;
+        }
+
+        return {
+          title: normalizedTitle,
+          content: normalizedContent,
+          sourceUrl,
+        };
+      }
+
+      function buildMeetingPrepQuestionPayload(snapshot) {
+        const meeting = snapshot?.upcomingMeetings?.find((item) => item.id === state.selectedMeetingId);
+        if (!meeting) {
+          return null;
+        }
+
+        const baseContext = buildMeetingContext();
+        const emailHistory = state.meetingEmailHistory[meeting.id];
+        const sessionHistory = state.meetingSessionHistory[meeting.id];
+        const driveHistory = state.meetingDriveHistory[meeting.id];
+
+        return {
+          title: meeting.title,
+          summary: null,
+          context: baseContext,
+          transcript: [],
+          coaching: [],
+          documents: [
+            createQuestionContextDocument("Meeting overview", buildMeetingOverviewContextBlock(meeting, baseContext)),
+            createQuestionContextDocument("Research summary", buildResearchContextBlock(meeting)),
+            createQuestionContextDocument("Email history", buildEmailHistoryContextBlock(emailHistory)),
+            createQuestionContextDocument("Prior Listen sessions", buildSessionHistoryContextBlock(sessionHistory)),
+            createQuestionContextDocument("Google Drive transcript history", buildDriveHistoryContextBlock(driveHistory)),
+            createQuestionContextDocument("Meeting brief", [
+              `Call function: ${baseContext.callFunction || ""}`,
+              `Call type: ${baseContext.callType || ""}`,
+              `Call goal: ${baseContext.callGoal || ""}`,
+              `Your role: ${baseContext.userRole || ""}`,
+              `Guest role: ${baseContext.guestRole || ""}`,
+              `Desired outcome: ${baseContext.desiredOutcome || ""}`,
+              `Notes: ${baseContext.notes || ""}`,
+            ].filter(Boolean).join("\n")),
+          ].filter(Boolean),
+        };
+      }
+
+      function buildReviewQuestionPayload() {
+        const selectedSession = getSelectedReviewSession();
+        if (selectedSession) {
+          const detail = state.reviewSessionDetails[selectedSession.sessionId]?.detail;
+          return {
+            title: selectedSession.meetingTitle,
+            summary: detail?.summary || selectedSession.summary || null,
+            context: detail?.context || selectedSession.context || null,
+            transcript: detail?.transcript || [],
+            coaching: detail?.coaching || [],
+            documents: [],
+          };
+        }
+
+        const selectedDocument = getSelectedReviewDocument();
+        if (!selectedDocument) {
+          return null;
+        }
+
+        return {
+          title: selectedDocument.title || "Saved document",
+          summary: null,
+          context: null,
+          transcript: [],
+          coaching: [],
+          documents: [createQuestionContextDocument(
+            selectedDocument.title || "Saved document",
+            selectedDocument.content || "",
+            selectedDocument.sourceUrl || null,
+          )].filter(Boolean),
+        };
       }
 
       function buildMeetingLaunchContextCacheKey(meeting, baseContext, emailHistory, sessionHistory) {
@@ -3032,6 +3446,7 @@
       function buildInlineMeetingPrepMarkup(meeting) {
         const context = state.meetingContexts[meeting.id] || defaultMeetingContext();
         const attendeeCount = meeting.attendees?.length || 0;
+        const canLaunchMeeting = Boolean(meeting.joinUrl);
         return `
           <div class="meeting-inline-prep">
             <div class="card inline-prep-card">
@@ -3056,7 +3471,7 @@
                   <div class="inline-prep-button-row">
                     <button id="inline-open-meeting-details" class="secondary">Details</button>
                     <button id="inline-save-meeting-brief" class="secondary">Save Brief</button>
-                    <button id="inline-launch-meeting">Launch Call</button>
+                    <button id="inline-launch-meeting" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>Launch Call</button>
                   </div>
                 </div>
               </div>
@@ -3179,9 +3594,46 @@
         return state.meetingSessionHistory[meetingId];
       }
 
+      async function loadMeetingDriveHistory(meetingId, options = {}) {
+        const { force = false } = options;
+        if (!meetingId) {
+          return null;
+        }
+
+        const existing = state.meetingDriveHistory[meetingId];
+        if (!force && existing && existing.status !== "loading") {
+          return existing;
+        }
+
+        state.meetingDriveHistory[meetingId] = {
+          status: "loading",
+          note: "Searching Google Drive for transcript documents...",
+          documents: [],
+        };
+        renderSelectedMeetingResearch(state.snapshot);
+
+        try {
+          const history = await window.listenBridge.getMeetingDriveHistory(meetingId);
+          state.meetingDriveHistory[meetingId] = history;
+        } catch (error) {
+          state.meetingDriveHistory[meetingId] = {
+            status: "error",
+            note: error instanceof Error ? error.message : String(error),
+            documents: [],
+          };
+        }
+
+        if (state.selectedMeetingId === meetingId) {
+          renderSelectedMeetingResearch(state.snapshot);
+        }
+
+        return state.meetingDriveHistory[meetingId];
+      }
+
       async function selectMeeting(meetingId, options = {}) {
         const { persistCurrent = true } = options;
         if (!meetingId) {
+          resetQaThread("prep");
           state.selectedMeetingId = null;
           state.selectedMeetingTemplateId = "";
           state.meetingModalOpen = false;
@@ -3192,6 +3644,7 @@
           selectedMeetingHistoryEl.innerHTML = '<div class="section-empty">Select a meeting to review related email and prior sessions.</div>';
           applyMeetingContext(defaultMeetingContext());
           renderMeetingTemplatePicker();
+          renderSessionQa(state.snapshot);
           syncMeetingModal();
           renderMeetings(state.snapshot);
           return;
@@ -3199,6 +3652,10 @@
 
         if (persistCurrent && state.selectedMeetingId && state.selectedMeetingId !== meetingId) {
           await persistMeetingBrief(state.selectedMeetingId);
+        }
+
+        if (state.selectedMeetingId !== meetingId) {
+          resetQaThread("prep");
         }
 
         state.selectedMeetingId = meetingId;
@@ -3210,9 +3667,11 @@
         renderMeetingTemplatePicker();
         renderMeetings(state.snapshot);
         renderSelectedMeetingResearch(state.snapshot);
+        renderSessionQa(state.snapshot);
         syncMeetingModal();
         void loadMeetingEmailHistory(meetingId);
         void loadMeetingSessionHistory(meetingId);
+        void loadMeetingDriveHistory(meetingId);
       }
 
       async function ensureSelectedMeeting(snapshot) {
@@ -3329,6 +3788,163 @@
         bucket.intervalId = intervalId;
       }
 
+      function getAutoStartMeetingCandidate() {
+        const meetings = state.snapshot?.upcomingMeetings || [];
+        if (!meetings.length) {
+          return null;
+        }
+
+        const now = Date.now();
+        const eligible = meetings
+          .filter((meeting) => {
+            const startsAt = new Date(meeting.startsAt).getTime();
+            const endsAt = new Date(meeting.endsAt).getTime();
+            return Number.isFinite(startsAt) && Number.isFinite(endsAt) && now >= startsAt - BACKGROUND_AUTO_START_LEAD_MS && now <= endsAt;
+          })
+          .sort((left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime());
+
+        if (!eligible.length) {
+          return null;
+        }
+
+        const selectedMeeting = eligible.find((meeting) => meeting.id === state.selectedMeetingId);
+        return selectedMeeting || eligible[0];
+      }
+
+      async function stopBackgroundMicMonitor() {
+        if (backgroundMicMonitorState.intervalId) {
+          clearInterval(backgroundMicMonitorState.intervalId);
+          backgroundMicMonitorState.intervalId = null;
+        }
+        if (backgroundMicMonitorState.stream) {
+          backgroundMicMonitorState.stream.getTracks().forEach((track) => track.stop());
+          backgroundMicMonitorState.stream = null;
+        }
+        if (backgroundMicMonitorState.audioContext) {
+          await backgroundMicMonitorState.audioContext.close();
+          backgroundMicMonitorState.audioContext = null;
+        }
+        backgroundMicMonitorState.mediaSource = null;
+        backgroundMicMonitorState.analyser = null;
+        backgroundMicMonitorState.armedAt = null;
+        backgroundMicMonitorState.candidateMeetingId = null;
+      }
+
+      async function autoStartSessionFromMicActivity(meetingId = null) {
+        if (backgroundMicMonitorState.triggerPending || state.snapshot?.activeSession) {
+          return;
+        }
+
+        backgroundMicMonitorState.triggerPending = true;
+        backgroundMicMonitorState.lastTriggeredAt = Date.now();
+        backgroundMicMonitorState.armedAt = null;
+        backgroundMicMonitorState.candidateMeetingId = null;
+
+        try {
+          const contextMeetingId = meetingId || state.selectedMeetingId;
+          const baseContext = contextMeetingId
+            ? state.meetingContexts[contextMeetingId]
+              || (await window.listenBridge.getMeetingBrief(contextMeetingId))
+              || defaultMeetingContext()
+            : defaultMeetingContext();
+          const meetingContext = contextMeetingId ? await buildLaunchMeetingContext(contextMeetingId, baseContext) : baseContext;
+          const approved = window.confirm(
+            meetingId
+              ? "Listen detected sustained microphone activity near a scheduled meeting. Start a session now?"
+              : "Listen detected sustained microphone activity. Start a session for an instant meeting now?",
+          );
+          if (!approved) {
+            setStatusBanner("info", "Automatic session start was skipped.");
+            return;
+          }
+          setStatusBanner(
+            "info",
+            meetingId
+              ? "Detected sustained microphone activity. Starting a Listen session for the nearest scheduled meeting."
+              : "Detected sustained microphone activity. Starting a Listen session for an instant meeting.",
+          );
+          const snapshot = await runUiAction("Starting session from microphone activity...", () =>
+            window.listenBridge.autoStartMeeting(meetingId, meetingContext)
+          );
+          await render(snapshot);
+        } catch (error) {
+          setStatusBanner("error", `Automatic session start failed: ${formatError(error)}`);
+        } finally {
+          backgroundMicMonitorState.triggerPending = false;
+        }
+      }
+
+      async function startBackgroundMicMonitor() {
+        if (backgroundMicMonitorState.permissionDenied || backgroundMicMonitorState.stream || state.snapshot?.activeSession) {
+          return;
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          const audioContext = new AudioContext();
+          if (audioContext.state === "suspended") {
+            await audioContext.resume();
+          }
+          const mediaSource = audioContext.createMediaStreamSource(stream);
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 2048;
+          mediaSource.connect(analyser);
+
+          backgroundMicMonitorState.stream = stream;
+          backgroundMicMonitorState.audioContext = audioContext;
+          backgroundMicMonitorState.mediaSource = mediaSource;
+          backgroundMicMonitorState.analyser = analyser;
+
+          const samples = new Uint8Array(analyser.fftSize);
+          backgroundMicMonitorState.intervalId = setInterval(() => {
+            if (backgroundMicMonitorState.triggerPending || state.snapshot?.activeSession) {
+              backgroundMicMonitorState.armedAt = null;
+              backgroundMicMonitorState.candidateMeetingId = null;
+              return;
+            }
+
+            const candidateMeeting = getAutoStartMeetingCandidate();
+            const candidateMeetingId = candidateMeeting?.id ?? null;
+
+            if (Date.now() - backgroundMicMonitorState.lastTriggeredAt < BACKGROUND_AUTO_START_COOLDOWN_MS) {
+              return;
+            }
+
+            analyser.getByteTimeDomainData(samples);
+            let sum = 0;
+            for (const sample of samples) {
+              const normalized = (sample - 128) / 128;
+              sum += normalized * normalized;
+            }
+            const rms = Math.sqrt(sum / samples.length);
+
+            if (rms < BACKGROUND_AUTO_START_RMS_THRESHOLD) {
+              backgroundMicMonitorState.armedAt = null;
+              backgroundMicMonitorState.candidateMeetingId = null;
+              return;
+            }
+
+            if (backgroundMicMonitorState.candidateMeetingId !== candidateMeetingId) {
+              backgroundMicMonitorState.candidateMeetingId = candidateMeetingId;
+              backgroundMicMonitorState.armedAt = Date.now();
+              return;
+            }
+
+            if (!backgroundMicMonitorState.armedAt) {
+              backgroundMicMonitorState.armedAt = Date.now();
+              return;
+            }
+
+            if (Date.now() - backgroundMicMonitorState.armedAt >= BACKGROUND_AUTO_START_SUSTAIN_MS) {
+              void autoStartSessionFromMicActivity(candidateMeetingId);
+            }
+          }, BACKGROUND_AUTO_START_POLL_MS);
+        } catch (error) {
+          backgroundMicMonitorState.permissionDenied = true;
+          setStatusBanner("info", `Background microphone auto-start is unavailable: ${formatError(error)}`);
+        }
+      }
+
       async function startRecorderForStream(source, stream, bucket) {
         const recordableStream = getRecordableAudioStream(source, stream);
         const audioContext = new AudioContext();
@@ -3365,6 +3981,23 @@
         bucket.processor = processor;
         bucket.mediaSource = mediaSource;
         bucket.silence = silence;
+
+        if (source === "system") {
+          const reportEndState = () => {
+            if (captureState.sessionId === null) {
+              return;
+            }
+
+            void window.listenBridge.reportProviderEnded();
+          };
+
+          for (const track of stream.getTracks()) {
+            track.addEventListener("ended", reportEndState, { once: true });
+          }
+          stream.addEventListener("inactive", reportEndState, { once: true });
+          bucket.reportEndState = reportEndState;
+        }
+
         await window.listenBridge.reportAudioStatus(source, "active", `${source} capture active.`);
       }
 
@@ -3470,6 +4103,10 @@
 
       function scheduleSpeechFallbackActivation(sessionId) {
         if (!speechFallbackState.supported) {
+          return;
+        }
+
+        if (state.runtimeCapabilities.cloudTranscriptionConfigured) {
           return;
         }
 
@@ -3661,6 +4298,7 @@
                 : "Research pending";
             const attendeeDetail = attendeeNames || attendeeSummary;
             const showInlinePrep = state.meetingLaunchPrepOpen && state.selectedMeetingId === meeting.id;
+            const canLaunchMeeting = Boolean(meeting.joinUrl);
             return `
               <div>
                 <div class="meeting-card ${meeting.id === state.selectedMeetingId && (state.meetingModalOpen || state.meetingLaunchPrepOpen) ? "selected" : ""}" data-meeting-id="${meeting.id}">
@@ -3671,14 +4309,14 @@
                     </div>
                     <div class="meeting-card-subline">
                       <div class="meeting-card-pill"><span>${escapeHtml(attendeeSummary)}</span></div>
-                      <div class="meeting-card-pill"><span>${escapeHtml(meeting.provider.replaceAll("_", " "))}</span></div>
+                      <div class="meeting-card-pill"><span>${escapeHtml(canLaunchMeeting ? meeting.provider.replaceAll("_", " ") : "no join link")}</span></div>
                       <div class="meeting-card-pill ${meeting.research?.status === "completed" ? "success" : "warning"}"><span>${escapeHtml(researchStatus)}</span></div>
                       ${attendeeDetail && attendeeDetail !== attendeeSummary ? `<div class="meeting-card-pill"><span>${escapeHtml(attendeeDetail)}</span></div>` : ""}
                     </div>
                   </div>
                   <div class="meeting-card-actions">
                     <button class="secondary meeting-details-button" data-open-details="${meeting.id}">Details</button>
-                      <button class="meeting-launch-button" data-launch="${meeting.id}">Prep Before Launch</button>
+                      <button class="meeting-launch-button" data-launch="${meeting.id}" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>Prep Before Launch</button>
                   </div>
                 </div>
                 ${showInlinePrep ? buildInlineMeetingPrepMarkup(meeting) : ""}
@@ -3820,6 +4458,7 @@
           `;
           const emailHistory = state.meetingEmailHistory[meeting.id];
           const sessionHistory = state.meetingSessionHistory[meeting.id];
+          const driveHistory = state.meetingDriveHistory[meeting.id];
           const personSummary = isUsefulResearchText(meeting.research?.personSummary) ? meeting.research.personSummary.trim() : "";
           const recentSignals = (meeting.research?.recentSignals || []).filter((signal) => isUsefulResearchText(signal)).slice(0, 5);
           const attendeeMarkup = meeting.attendees?.length
@@ -3913,6 +4552,27 @@
                       `).join("")}</div>`
                     : `<div class="section-empty">${escapeHtml(sessionHistory?.note || "No related Listen sessions found.")}</div>`}
               </div>
+              <div class="research-section full-width">
+                <div class="inline-actions">
+                  <h3>Google Drive Transcripts</h3>
+                  <button id="refresh-meeting-drive" class="secondary">Refresh</button>
+                </div>
+                ${!driveHistory || driveHistory.status === "loading"
+                  ? '<div class="section-empty">Searching Google Drive for transcript documents...</div>'
+                  : driveHistory.status === "not_connected" || driveHistory.status === "needs_reconnect"
+                    ? `<div class="section-empty">${escapeHtml(driveHistory.note || "Connect Google in Setup to enable Drive transcript search for this meeting.")}</div>`
+                  : driveHistory.status === "error"
+                    ? `<div class="section-empty">${escapeHtml(driveHistory.note || "Google Drive transcript history could not be loaded.")}</div>`
+                  : driveHistory.documents?.length
+                    ? `<p class="muted">${escapeHtml(driveHistory.note || "Related Google Drive transcript documents.")}</p><div class="session-history-list">${driveHistory.documents.map((document) => `
+                        <div class="session-history-item">
+                          <strong><a href="${escapeHtml(document.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(document.title)}</a></strong>
+                          <div class="meta-line">${escapeHtml(formatDate(document.modifiedAt))}${document.mimeType ? ` · ${escapeHtml(document.mimeType)}` : ""}</div>
+                          <p>${escapeHtml(document.snippet || "No readable text snippet was available for this document.")}</p>
+                        </div>
+                      `).join("")}</div>`
+                    : `<div class="section-empty">${escapeHtml(driveHistory?.note || "No related Google Drive transcript documents found.")}</div>`}
+              </div>
             </div>
           `;
 
@@ -3927,6 +4587,13 @@
         if (refreshSessionsButton) {
           refreshSessionsButton.addEventListener("click", async () => {
             await loadMeetingSessionHistory(meeting.id, { force: true });
+          });
+        }
+
+        const refreshDriveButton = document.getElementById("refresh-meeting-drive");
+        if (refreshDriveButton) {
+          refreshDriveButton.addEventListener("click", async () => {
+            await loadMeetingDriveHistory(meeting.id, { force: true });
           });
         }
         }
@@ -4112,7 +4779,12 @@
 
         const sessionsState = state.reviewSessions;
         const filteredSessions = getFilteredReviewSessions();
-        reviewSessionListEl.innerHTML = sessionsState.status === "loading" && !sessionsState.items.length
+        const filteredDocuments = getFilteredReviewDocuments();
+        const documentCandidates = filteredDocuments.length || reviewSearchQueryEl.value.trim()
+          ? filteredDocuments
+          : state.orgDocuments.slice(0, 5);
+
+        const sessionMarkup = sessionsState.status === "loading" && !sessionsState.items.length
           ? '<div class="section-empty">Loading saved Listen sessions...</div>'
           : sessionsState.status === "error"
             ? `<div class="section-empty">${escapeHtml(sessionsState.note || "Saved session history could not be loaded.")}</div>`
@@ -4129,11 +4801,45 @@
                 `).join("")
               : sessionsState.items.length
                 ? '<div class="section-empty">No saved calls match the current filters.</div>'
-              : `<div class="section-empty">${escapeHtml(sessionsState.note || "No saved calls yet. Finish one call and it will appear here.")}</div>`;
+                : `<div class="section-empty">${escapeHtml(sessionsState.note || "No saved calls yet. Finish one call and it will appear here.")}</div>`;
+
+        const documentMarkup = documentCandidates.length
+          ? documentCandidates.map((document) => `
+              <button class="review-session-button ${document.id === state.selectedReviewDocumentId ? "active" : ""}" data-review-document-id="${document.id}">
+                <div class="row-between">
+                  <strong>${escapeHtml(document.title || "Untitled document")}</strong>
+                  <span class="badge neutral">document</span>
+                </div>
+                <div class="meta-line">${escapeHtml(formatDate(document.updatedAt))}</div>
+                <div class="muted">${escapeHtml((document.sourceName || "saved note") + (document.sourceUrl ? " / linked source" : ""))}</div>
+              </button>
+            `).join("")
+          : '<div class="section-empty">No saved documents yet.</div>';
+
+        reviewSessionListEl.innerHTML = `
+          <div class="review-panel">
+            <div>
+              <h3>Saved Calls</h3>
+            </div>
+            ${sessionMarkup}
+          </div>
+          <div class="review-panel">
+            <div>
+              <h3>Saved Documents</h3>
+              <p class="muted">Imported notes and attached documents can be opened here.</p>
+            </div>
+            ${documentMarkup}
+          </div>
+        `;
 
         document.querySelectorAll("[data-review-session-id]").forEach((button) => {
           button.addEventListener("click", async () => {
             await selectReviewSession(button.getAttribute("data-review-session-id"), { preserveQuestion: false });
+          });
+        });
+        document.querySelectorAll("[data-review-document-id]").forEach((button) => {
+          button.addEventListener("click", () => {
+            selectReviewDocument(button.getAttribute("data-review-document-id"));
           });
         });
 
@@ -4143,12 +4849,51 @@
         });
 
         const selectedSession = getSelectedReviewSession(filteredSessions);
-        if (!selectedSession) {
+        const selectedDocument = getSelectedReviewDocument(documentCandidates);
+        if (!selectedSession && !selectedDocument) {
           reviewSessionDetailEl.innerHTML = `
             <div>
               <div class="eyebrow">Review</div>
-              <h2 class="review-empty-title">No call selected</h2>
-              <p class="muted">Choose a saved call from the left to inspect the summary, coaching history, and transcript.</p>
+              <h2 class="review-empty-title">Nothing selected</h2>
+              <p class="muted">Choose a saved call or a saved document from the left to inspect it.</p>
+            </div>
+          `;
+          return;
+        }
+
+        if (!selectedSession && selectedDocument) {
+          reviewSessionDetailEl.innerHTML = `
+            <div class="review-session-header">
+              <div>
+                <div class="eyebrow">Selected Document</div>
+                <h2>${escapeHtml(selectedDocument.title || "Untitled document")}</h2>
+                <p class="muted">${escapeHtml(selectedDocument.sourceName || "Saved note")}</p>
+              </div>
+              <div class="page-chip-row">
+                <span class="page-chip">Updated ${escapeHtml(formatDate(selectedDocument.updatedAt))}</span>
+                ${selectedDocument.mimeType ? `<span class="page-chip">${escapeHtml(selectedDocument.mimeType)}</span>` : ""}
+              </div>
+            </div>
+            <div class="review-summary-grid">
+              <div class="review-summary-section">
+                <h3>Source</h3>
+                ${selectedDocument.sourceUrl
+                  ? `<div class="review-bullet-list"><div class="review-bullet-item"><a href="${escapeHtml(selectedDocument.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(selectedDocument.sourceUrl)}</a></div></div>`
+                  : '<div class="section-empty">No source link was stored for this document.</div>'}
+              </div>
+              <div class="review-summary-section">
+                <h3>Preview</h3>
+                <div class="review-bullet-list"><div class="review-bullet-item">${escapeHtml((selectedDocument.content || "").slice(0, 280) || "No content saved.")}</div></div>
+              </div>
+            </div>
+            <div class="review-panel research-section">
+              <div class="card-header">
+                <div>
+                  <h3>Document Content</h3>
+                  <p class="muted">Read the full saved note or imported document.</p>
+                </div>
+              </div>
+              <div class="section-scroller"><div class="review-bullet-item">${escapeHtml(selectedDocument.content || "No content saved.")}</div></div>
             </div>
           `;
           return;
@@ -4216,6 +4961,12 @@
                   </div>`
                 : '<div class="section-empty">No saved meeting brief context for this call.</div>'}
             </div>
+            <div class="review-summary-section">
+              <h3>Saved Notes</h3>
+              ${context?.notes
+                ? `<div class="review-bullet-list"><div class="review-bullet-item">${escapeHtml(context.notes)}</div></div>`
+                : '<div class="section-empty">No saved notes were stored for this call.</div>'}
+            </div>
           </div>
           <div class="review-detail-grid">
             <div class="review-panel research-section">
@@ -4249,21 +5000,27 @@
       }
 
       function renderSessionQaPanel(targetEl, snapshot, options = {}) {
-        const { mode = "review" } = options;
-        const panelKey = mode === "active" ? "active" : "review";
+        const { mode = "review", domKey = null } = options;
+        const panelKey = mode === "active" ? "active" : mode === "prep" ? "prep" : "review";
+        const elementKey = domKey || panelKey;
         const qaState = state.sessionQa[panelKey];
         const selectedReviewSession = getSelectedReviewSession();
-        const hasContext = panelKey === "active" ? Boolean(snapshot.activeSession) : Boolean(selectedReviewSession);
+        const selectedReviewDocument = getSelectedReviewDocument();
+        const hasContext = panelKey === "active"
+          ? Boolean(snapshot.activeSession)
+          : panelKey === "prep"
+            ? Boolean(state.selectedMeetingId)
+            : Boolean(selectedReviewSession || selectedReviewDocument);
 
         if (!hasContext) {
           targetEl.innerHTML = panelKey === "active"
             ? ""
             : `
-              <p class="muted">Choose a saved call to ask about its transcript, coaching, and meeting context.</p>
-              <div id="session-qa-thread-${panelKey}" class="qa-thread-shell">
+              <p class="muted">${panelKey === "prep" ? "Choose a meeting to ask across the brief, research, email history, prior sessions, and saved transcript documents." : "Choose a saved call or document to ask about its stored context."}</p>
+              <div id="session-qa-thread-${elementKey}" class="qa-thread-shell">
                 <div class="qa-message assistant">
                   <div class="meta-line">Listen</div>
-                  <div class="qa-bubble"><p class="muted">The Q&A thread will appear here once a call is selected.</p></div>
+                  <div class="qa-bubble"><p class="muted">The Q&A thread will appear here once a context is selected.</p></div>
                 </div>
               </div>
             `;
@@ -4272,9 +5029,13 @@
 
         const guidance = panelKey === "active"
           ? ""
-          : selectedReviewSession
-            ? `Ask about ${selectedReviewSession.meetingTitle} using its stored transcript, coaching, and meeting context.`
-            : "Select a saved call first so there is session context to query.";
+          : panelKey === "prep"
+            ? "Ask about this meeting using the brief, research, email history, prior Listen sessions, Drive transcripts, and org context we already have."
+            : selectedReviewSession
+              ? `Ask about ${selectedReviewSession.meetingTitle} using its stored transcript, coaching, and meeting context.`
+              : selectedReviewDocument
+                ? `Ask about ${selectedReviewDocument.title || "this saved document"} using its stored content and org context.`
+                : "Select a saved call first so there is session context to query.";
 
         const historyMarkup = qaState.history.length
           ? qaState.history
@@ -4313,33 +5074,46 @@
 
         targetEl.innerHTML = `
           ${guidance ? `<p class="muted">${escapeHtml(guidance)}</p>` : ""}
-          <div id="session-qa-thread-${panelKey}" class="qa-thread-shell ${panelKey === "active" ? "compact" : ""}">
+          <div id="session-qa-thread-${elementKey}" class="qa-thread-shell ${panelKey === "active" ? "compact" : ""}">
             <div class="qa-thread">
               ${historyMarkup}
               ${pendingReplyMarkup}
             </div>
           </div>
           <div class="composer">
-            <textarea id="session-question-${panelKey}" rows="${panelKey === "active" ? "2" : "3"}" placeholder="${panelKey === "active" ? "Ask about the call" : "What objection came up? What mattered most to the guest? What follow-up should I send?"}"></textarea>
+            <textarea id="session-question-${elementKey}" rows="${panelKey === "active" ? "2" : "3"}" placeholder="${panelKey === "active" ? "Ask about the call" : panelKey === "prep" ? "What do we already know? What risk should I prepare for? What should I ask next?" : "What objection came up? What mattered most to the guest? What follow-up should I send?"}"></textarea>
           </div>
           <div class="meeting-actions">
-            <button id="ask-session-question-${panelKey}" class="secondary" ${!hasContext || qaState.pending ? "disabled" : ""}>${qaState.pending ? "Asking..." : "Ask"}</button>
+            <button id="ask-session-question-${elementKey}" class="secondary" ${!hasContext || qaState.pending ? "disabled" : ""}>${qaState.pending ? "Asking..." : "Ask"}</button>
           </div>
         `;
 
-        const askButton = document.getElementById(`ask-session-question-${panelKey}`);
-        const questionEl = document.getElementById(`session-question-${panelKey}`);
-        const threadEl = document.getElementById(`session-qa-thread-${panelKey}`);
+        const askButton = document.getElementById(`ask-session-question-${elementKey}`);
+        const questionEl = document.getElementById(`session-question-${elementKey}`);
+        const threadEl = document.getElementById(`session-qa-thread-${elementKey}`);
         if (threadEl) {
           threadEl.scrollTop = threadEl.scrollHeight;
         }
         if (questionEl) {
           questionEl.value = qaState.pendingQuestion || "";
+          questionEl.addEventListener("input", () => {
+            qaState.pendingQuestion = questionEl.value;
+          });
         }
         askButton?.addEventListener("click", async () => {
           const question = questionEl.value.trim();
           if (!question) {
             setStatusBanner("error", "Enter a question first.");
+            return;
+          }
+
+          const contextPayload = panelKey === "prep"
+            ? buildMeetingPrepQuestionPayload(snapshot)
+            : panelKey === "review"
+              ? buildReviewQuestionPayload()
+              : null;
+          if (panelKey !== "active" && !contextPayload) {
+            setStatusBanner("error", "There is no saved context to query yet.");
             return;
           }
 
@@ -4352,7 +5126,12 @@
           renderSessionQa(snapshot);
 
           try {
-            const answer = await window.listenBridge.askSessionQuestion(question, panelKey === "review" ? state.selectedReviewSessionId : null);
+            const answer = panelKey === "active"
+              ? await window.listenBridge.askSessionQuestion(question, null)
+              : await window.listenBridge.askContextQuestion({
+                  ...contextPayload,
+                  question,
+                });
             qaState.history.push({
               role: "assistant",
               text: answer.answer,
@@ -4369,12 +5148,6 @@
           } finally {
             qaState.pending = false;
             renderSessionQa(state.snapshot);
-            ["active", "review"].forEach((key) => {
-              const refreshedQuestionEl = document.getElementById(`session-question-${key}`);
-              if (refreshedQuestionEl) {
-                refreshedQuestionEl.value = state.sessionQa[key].pendingQuestion || "";
-              }
-            });
           }
         });
       }
@@ -4382,6 +5155,14 @@
       function renderSessionQa(snapshot) {
         if (activeSessionQaEl) {
           renderSessionQaPanel(activeSessionQaEl, snapshot, { mode: "active" });
+        }
+
+        if (selectedMeetingResearchQaEl) {
+          renderSessionQaPanel(selectedMeetingResearchQaEl, snapshot, { mode: "prep", domKey: "prep-research" });
+        }
+
+        if (selectedMeetingHistoryQaEl) {
+          renderSessionQaPanel(selectedMeetingHistoryQaEl, snapshot, { mode: "prep", domKey: "prep-history" });
         }
 
         if (sessionQaEl) {
@@ -4405,7 +5186,13 @@
         renderCoaching(snapshot);
         renderReviewWorkspace(snapshot);
         renderSessionQa(snapshot);
+        if (snapshot.activeSession) {
+          await stopBackgroundMicMonitor();
+        }
         await ensureCaptureForSnapshot(snapshot);
+        if (!snapshot.activeSession) {
+          await startBackgroundMicMonitor();
+        }
       }
 
       document.getElementById("refresh-calendars").addEventListener("click", async () => {
@@ -4428,14 +5215,34 @@
         );
         applyCoachingPreferences(preferences);
       });
+      saveRuntimeSecretsButtonEl.addEventListener("click", async () => {
+        const secrets = await runUiAction("Saving API keys...", () =>
+          window.listenBridge.saveRuntimeSecrets({
+            aiApiKey: runtimeAiApiKeyEl.value,
+            transcriptionApiKey: runtimeTranscriptionApiKeyEl.value,
+          })
+        );
+        applyRuntimeSecrets(secrets);
+        state.runtimeCapabilities = await window.listenBridge.getRuntimeCapabilities();
+        renderSetupStatus(state.snapshot);
+      });
       checkForUpdatesButtonEl.addEventListener("click", async () => {
         if (state.updater.availability === "downloaded") {
           await runUiAction("Installing update...", () => window.listenBridge.installUpdate());
           return;
         }
 
-        state.updater = await runUiAction("Checking for updates...", () => window.listenBridge.checkForUpdates());
-        renderUpdaterStatus();
+        applyUpdaterState({
+          ...state.updater,
+          availability: "checking",
+          availableVersion: null,
+          checkedAt: new Date().toISOString(),
+          progress: null,
+          message: "Checking for updates...",
+        });
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        const updaterState = await runUiAction("Checking for updates...", () => window.listenBridge.checkForUpdates());
+        applyUpdaterState(updaterState);
       });
       document.getElementById("save-meeting-brief").addEventListener("click", async () => {
         if (!state.selectedMeetingId) {
@@ -4448,6 +5255,12 @@
       launchMeetingFromBriefButtonEl.addEventListener("click", async () => {
         if (!state.selectedMeetingId) {
           setStatusBanner("error", "Select a meeting first.");
+          return;
+        }
+
+        const meeting = state.snapshot?.upcomingMeetings?.find((item) => item.id === state.selectedMeetingId);
+        if (!meeting?.joinUrl) {
+          setStatusBanner("error", "This calendar event does not include a meeting link to launch.");
           return;
         }
 
@@ -4534,10 +5347,16 @@
       });
       [reviewSearchQueryEl, reviewSearchFunctionEl, reviewSearchDateEl].forEach((input) => {
         input?.addEventListener("input", () => {
-          void syncReviewFilterSelection();
+          void (async () => {
+            await syncReviewFilterSelection();
+            await hydrateReviewSearchDetails();
+          })();
         });
         input?.addEventListener("change", () => {
-          void syncReviewFilterSelection();
+          void (async () => {
+            await syncReviewFilterSelection();
+            await hydrateReviewSearchDetails();
+          })();
         });
       });
       toggleActiveCallDetailsButtonEl.addEventListener("click", () => {
@@ -4565,8 +5384,7 @@
         void render(snapshot);
       });
       window.listenBridge.onUpdaterState((updaterState) => {
-        state.updater = updaterState;
-        renderUpdaterStatus();
+        applyUpdaterState(updaterState);
       });
       state.sidebarCollapsed = readSidebarCollapsedPreference();
       populateCallFunctionOptions();
@@ -4575,32 +5393,78 @@
       syncPageVisibility();
       syncPrepPanels();
       syncSetupPanels();
-      Promise.all([
+      Promise.allSettled([
         window.listenBridge.getRuntimeCapabilities(),
+        window.listenBridge.getRuntimeSecrets(),
         window.listenBridge.getUpdaterState(),
         window.listenBridge.getSnapshot(),
         window.listenBridge.getCoachingPreferences(),
         window.listenBridge.listOrgDocuments(),
         window.listenBridge.listMeetingTemplates(),
       ])
-        .then(([runtimeCapabilities, updaterState, snapshot, coachingPreferences, orgDocuments, meetingTemplates]) => {
-          state.runtimeCapabilities = runtimeCapabilities;
-          state.updater = updaterState;
-          applyCoachingPreferences(coachingPreferences);
-          state.orgDocuments = orgDocuments;
-          state.meetingTemplates = meetingTemplates;
+        .then((results) => {
+          const [runtimeCapabilitiesResult, runtimeSecretsResult, updaterStateResult, snapshotResult, coachingPreferencesResult, orgDocumentsResult, meetingTemplatesResult] = results;
+
+          if (runtimeCapabilitiesResult.status === "fulfilled") {
+            state.runtimeCapabilities = runtimeCapabilitiesResult.value;
+          }
+          if (runtimeSecretsResult.status === "fulfilled") {
+            applyRuntimeSecrets(runtimeSecretsResult.value);
+          }
+          if (updaterStateResult.status === "fulfilled") {
+            state.updater = updaterStateResult.value;
+          }
+          if (coachingPreferencesResult.status === "fulfilled") {
+            applyCoachingPreferences(coachingPreferencesResult.value);
+          }
+          if (orgDocumentsResult.status === "fulfilled") {
+            state.orgDocuments = orgDocumentsResult.value;
+          }
+          if (meetingTemplatesResult.status === "fulfilled") {
+            state.meetingTemplates = meetingTemplatesResult.value;
+          }
+
           renderOrgDocuments();
           renderMeetingTemplates();
           renderMeetingTemplatePicker();
           renderUpdaterStatus();
-          clearStatusBanner();
+          const failedLabels = [];
+          const failureMessages = [];
+          const snapshot = snapshotResult.status === "fulfilled" ? snapshotResult.value : createEmptySnapshot();
+
+          if (snapshotResult.status === "rejected") {
+            failedLabels.push("live session service");
+            failureMessages.push(`Desktop app loaded in offline mode: ${formatError(snapshotResult.reason)}`);
+          }
+          if (runtimeSecretsResult.status === "rejected") {
+            failedLabels.push("API keys");
+          }
+          if (coachingPreferencesResult.status === "rejected") {
+            failedLabels.push("coaching preferences");
+          }
+          if (orgDocumentsResult.status === "rejected") {
+            failedLabels.push("org documents");
+          }
+          if (meetingTemplatesResult.status === "rejected") {
+            failedLabels.push("meeting templates");
+          }
+
+          if (failedLabels.length) {
+            const prefix = `Some desktop data is temporarily unavailable: ${failedLabels.join(", ")}.`;
+            const suffix = failureMessages.length ? ` ${failureMessages.join(" ")}` : "";
+            setStatusBanner("info", `${prefix}${suffix}`);
+          } else {
+            clearStatusBanner();
+          }
           return render(snapshot);
         })
         .catch((error) => {
-          setStatusBanner("error", `Desktop bridge failed to initialize: ${formatError(error)}`);
+          setStatusBanner("error", `Desktop app failed to initialize: ${formatError(error)}`);
         });
       window.addEventListener("beforeunload", () => {
         void stopCapture();
+        void stopBackgroundMicMonitor();
+        clearPendingUpdaterVisualState();
       });
     </script>
   </body>

@@ -18,9 +18,9 @@ export class ResearchWorker {
     }
 
     this.intervalId = setInterval(() => {
-      void this.runOnce();
+      void this.runWithLogging();
     }, this.pollMs);
-    void this.runOnce();
+    void this.runWithLogging();
   }
 
   stop(): void {
@@ -53,6 +53,14 @@ export class ResearchWorker {
       return { processedCount: jobs.length };
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  private async runWithLogging(): Promise<void> {
+    try {
+      await this.runOnce();
+    } catch (error) {
+      console.error("Research worker run failed", error);
     }
   }
 }

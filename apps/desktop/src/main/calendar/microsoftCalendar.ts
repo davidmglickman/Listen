@@ -3,6 +3,11 @@ import type { CalendarConnection, MeetingRecord } from "@listen/shared";
 import type { StoredOAuthToken } from "../storage/sessionStore";
 import { extractMeetingLink, parseMeetingLink } from "./meetingLinkParser";
 
+const genericMeetingLink = {
+  provider: "generic",
+  launchStrategy: "browser",
+} as const;
+
 interface MicrosoftDateTimeTimeZone {
   dateTime: string;
 }
@@ -63,8 +68,8 @@ export class MicrosoftCalendarProvider {
 
   async getUpcomingMeetings(accessToken: string): Promise<MeetingRecord[]> {
     const startDateTime = new Date().toISOString();
-    const endDateTime = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
-    const endpoint = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(startDateTime)}&endDateTime=${encodeURIComponent(endDateTime)}&$top=25&$select=id,subject,bodyPreview,location,onlineMeeting,onlineMeetingUrl,start,end,attendees,organizer`;
+    const endDateTime = new Date(Date.now() + 14 * 24 * 60 * 60_000).toISOString();
+    const endpoint = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(startDateTime)}&endDateTime=${encodeURIComponent(endDateTime)}&$top=100&$select=id,subject,bodyPreview,location,onlineMeeting,onlineMeetingUrl,start,end,attendees,organizer`;
     const response = await fetch(endpoint, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -78,12 +83,12 @@ export class MicrosoftCalendarProvider {
     const payload = (await response.json()) as MicrosoftCalendarResponse;
     return (payload.value ?? [])
       .map((event) => {
-        const joinUrl = extractMeetingLink(event.onlineMeeting?.joinUrl, event.onlineMeetingUrl, event.location?.displayName, event.bodyPreview);
-        if (!joinUrl || !event.start?.dateTime || !event.end?.dateTime) {
+        const joinUrl = extractMeetingLink(event.onlineMeeting?.joinUrl, event.onlineMeetingUrl, event.location?.displayName, event.bodyPreview) ?? "";
+        if (!event.start?.dateTime || !event.end?.dateTime) {
           return null;
         }
 
-        const parsed = parseMeetingLink(joinUrl);
+        const parsed = joinUrl ? parseMeetingLink(joinUrl) : genericMeetingLink;
         return {
           id: `microsoft-${event.id}`,
           externalId: event.id,

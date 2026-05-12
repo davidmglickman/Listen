@@ -1,5 +1,12 @@
 import type { AudioSourceKind } from "@listen/shared";
 
+import {
+  clipTraceTextPreview,
+  type SpeakerResolutionDecision,
+  type SpeakerResolutionTrace,
+} from "../diagnostics/speakerTrace";
+import { getDeepgramRuntimeConfig } from "../runtime/runtimeSecrets";
+
 export interface TranscriptionSegment {
   source: AudioSourceKind;
   text: string;
@@ -9,8 +16,17 @@ export interface TranscriptionSegment {
   createdAt: string;
 }
 
+interface TranscriptionAttendeeCandidate {
+  fullName: string;
+  email?: string;
+}
+
 export interface StreamingTranscriptionProvider {
-  startSession(sessionId: string, onSegment: (segment: TranscriptionSegment) => void): Promise<void>;
+  startSession(
+    sessionId: string,
+    onSegment: (segment: TranscriptionSegment) => void,
+    options?: { attendees?: TranscriptionAttendeeCandidate[]; onTrace?: (trace: SpeakerResolutionTrace) => void },
+  ): Promise<void>;
   ingestChunk(sessionId: string, source: AudioSourceKind, payloadBase64: string): Promise<void>;
   stopSession(sessionId: string): Promise<void>;
 }
@@ -35,6 +51,12 @@ interface DeepgramResponse {
   };
 }
 
+interface GuestParticipant {
+  ordinal: number;
+  label: string;
+  lastSeenAt: string;
+}
+
 interface BufferedSourceState {
   chunks: Buffer[];
   byteLength: number;
@@ -44,9 +66,11 @@ interface BufferedSourceState {
 
 interface DeepgramSession {
   onSegment: (segment: TranscriptionSegment) => void;
+  onTrace?: (trace: SpeakerResolutionTrace) => void;
   microphone: BufferedSourceState;
   system: BufferedSourceState;
-  guestSpeakerLabels: Map<number, string>;
+  guestParticipants: GuestParticipant[];
+  availableAttendeeNames: string[];
   nextGuestSpeakerOrdinal: number;
 }
 
@@ -57,17 +81,53 @@ const BYTES_PER_SAMPLE = 2;
 // A larger window improves guest separation at the cost of a bit more latency.
 const TARGET_FLUSH_MS = 7_500;
 const TARGET_FLUSH_BYTES = STREAM_SAMPLE_RATE * CHANNEL_COUNT * BYTES_PER_SAMPLE * 8;
+const GUEST_PARTICIPANT_REUSE_WINDOW_MS = 30_000;
 
-function getDeepgramApiKey(): string {
-  return process.env.DEEPGRAM_API_KEY?.trim() ?? "";
+function looksLikeEmail(value: string): boolean {
+  return /@/.test(value);
+}
+
+function isUsefulAttendeeLabel(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (looksLikeEmail(normalized)) {
+    return false;
+  }
+
+  return !/^guest(?:\s+\d+)?$/i.test(normalized);
+}
+
+function normalizeAttendeeNames(attendees: TranscriptionAttendeeCandidate[] | undefined): string[] {
+  const seen = new Set<string>();
+  const normalizedNames: string[] = [];
+
+  for (const attendee of attendees ?? []) {
+    const normalizedName = attendee.fullName.trim().replace(/\s+/g, " ");
+    if (!isUsefulAttendeeLabel(normalizedName)) {
+      continue;
+    }
+
+    const dedupeKey = normalizedName.toLowerCase();
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    normalizedNames.push(normalizedName);
+  }
+
+  return normalizedNames;
 }
 
 function getDeepgramModel(): string {
-  return process.env.DEEPGRAM_MODEL?.trim() || "nova-3";
+  return getDeepgramRuntimeConfig().model;
 }
 
 function getDeepgramLanguage(): string {
-  return process.env.DEEPGRAM_LANGUAGE?.trim() || "en-US";
+  return getDeepgramRuntimeConfig().language;
 }
 
 function createDeepgramUrl(): string {
@@ -81,24 +141,167 @@ function createDeepgramUrl(): string {
   return url.toString();
 }
 
-function getSpeakerLabel(session: DeepgramSession, source: AudioSourceKind, speakerId: number | null): string | null {
+function getRecentGuestParticipants(session: DeepgramSession, occurredAt: string): GuestParticipant[] {
+  const occurredAtMs = Date.parse(occurredAt);
+  if (!Number.isFinite(occurredAtMs)) {
+    return [];
+  }
+
+  return session.guestParticipants
+    .filter((participant) => {
+      const lastSeenAtMs = Date.parse(participant.lastSeenAt);
+      return Number.isFinite(lastSeenAtMs) && occurredAtMs - lastSeenAtMs <= GUEST_PARTICIPANT_REUSE_WINDOW_MS;
+    })
+    .sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt));
+}
+
+function createGuestParticipant(session: DeepgramSession, occurredAt: string): GuestParticipant {
+  session.nextGuestSpeakerOrdinal += 1;
+  const attendeeName = session.availableAttendeeNames[session.nextGuestSpeakerOrdinal - 1] ?? null;
+  const participant = {
+    ordinal: session.nextGuestSpeakerOrdinal,
+    label: attendeeName || `Guest ${session.nextGuestSpeakerOrdinal}`,
+    lastSeenAt: occurredAt,
+  };
+  session.guestParticipants.push(participant);
+  return participant;
+}
+
+interface GuestParticipantResolution {
+  participant: GuestParticipant | null;
+  decision: SpeakerResolutionDecision;
+}
+
+function resolveGuestParticipant(
+  session: DeepgramSession,
+  source: AudioSourceKind,
+  speakerId: number | null,
+  occurredAt: string,
+  uniqueSpeakerCount: number,
+  requestSpeakerMap: Map<number, GuestParticipant | null>,
+): GuestParticipantResolution {
   if (source === "microphone") {
-    return "You";
+    return {
+      participant: null,
+      decision: "microphone",
+    };
+  }
+
+  if (typeof speakerId === "number") {
+    const existingParticipant = requestSpeakerMap.get(speakerId);
+    if (existingParticipant) {
+      existingParticipant.lastSeenAt = occurredAt;
+      return {
+        participant: existingParticipant,
+        decision: "existing_speaker_id",
+      };
+    }
+
+    if (requestSpeakerMap.has(speakerId)) {
+      return {
+        participant: null,
+        decision: "unresolved_generic_guest",
+      };
+    }
+  }
+
+  const recentParticipants = getRecentGuestParticipants(session, occurredAt);
+  if (recentParticipants.length === 1 && uniqueSpeakerCount === 1) {
+    const participant = recentParticipants[0];
+    participant.lastSeenAt = occurredAt;
+    if (typeof speakerId === "number") {
+      requestSpeakerMap.set(speakerId, participant);
+    }
+    return {
+      participant,
+      decision: "recent_guest_reuse",
+    };
+  }
+
+  if (uniqueSpeakerCount === 1 && recentParticipants.length > 1) {
+    if (typeof speakerId === "number") {
+      requestSpeakerMap.set(speakerId, null);
+    }
+    return {
+      participant: null,
+      decision: "unresolved_generic_guest",
+    };
   }
 
   if (speakerId === null) {
-    return "Guest";
+    return {
+      participant: null,
+      decision: "unresolved_generic_guest",
+    };
   }
 
-  const existingLabel = session.guestSpeakerLabels.get(speakerId);
-  if (existingLabel) {
-    return existingLabel;
+  const participant = createGuestParticipant(session, occurredAt);
+  requestSpeakerMap.set(speakerId, participant);
+  return {
+    participant,
+    decision: participant.label.startsWith("Guest ") ? "new_guest_fallback" : "new_guest_from_attendee",
+  };
+}
+
+function getSpeakerSegmentIdentity(
+  session: DeepgramSession,
+  source: AudioSourceKind,
+  speakerId: number | null,
+  occurredAt: string,
+  uniqueSpeakerCount: number,
+  text: string,
+  requestSpeakerMap: Map<number, GuestParticipant | null>,
+): Pick<TranscriptionSegment, "speakerId" | "speakerLabel"> {
+  if (source === "microphone") {
+    session.onTrace?.({
+      source,
+      originalSpeakerId: speakerId,
+      resolvedSpeakerId: speakerId ?? null,
+      resolvedSpeakerLabel: "You",
+      uniqueSpeakerCount,
+      decision: "microphone",
+      occurredAt,
+      textPreview: clipTraceTextPreview(text),
+    });
+    return {
+      speakerId: speakerId ?? null,
+      speakerLabel: "You",
+    };
   }
 
-  session.nextGuestSpeakerOrdinal += 1;
-  const nextLabel = `Guest ${session.nextGuestSpeakerOrdinal}`;
-  session.guestSpeakerLabels.set(speakerId, nextLabel);
-  return nextLabel;
+  const resolution = resolveGuestParticipant(session, source, speakerId, occurredAt, uniqueSpeakerCount, requestSpeakerMap);
+  if (resolution.participant) {
+    session.onTrace?.({
+      source,
+      originalSpeakerId: speakerId,
+      resolvedSpeakerId: resolution.participant.ordinal,
+      resolvedSpeakerLabel: resolution.participant.label,
+      uniqueSpeakerCount,
+      decision: resolution.decision,
+      occurredAt,
+      textPreview: clipTraceTextPreview(text),
+    });
+    return {
+      speakerId: resolution.participant.ordinal,
+      speakerLabel: resolution.participant.label,
+    };
+  }
+
+  session.onTrace?.({
+    source,
+    originalSpeakerId: speakerId,
+    resolvedSpeakerId: null,
+    resolvedSpeakerLabel: "Guest",
+    uniqueSpeakerCount,
+    decision: resolution.decision,
+    occurredAt,
+    textPreview: clipTraceTextPreview(text),
+  });
+
+  return {
+    speakerId: null,
+    speakerLabel: "Guest",
+  };
 }
 
 function createSourceState(): BufferedSourceState {
@@ -133,7 +336,11 @@ function wrapPcm16AsWav(pcmPayload: Buffer, sampleRate: number, channelCount: nu
 }
 
 export class NoopStreamingTranscriptionProvider implements StreamingTranscriptionProvider {
-  async startSession(_sessionId: string, _onSegment: (segment: TranscriptionSegment) => void): Promise<void> {
+  async startSession(
+    _sessionId: string,
+    _onSegment: (segment: TranscriptionSegment) => void,
+    _options?: { attendees?: TranscriptionAttendeeCandidate[]; onTrace?: (trace: SpeakerResolutionTrace) => void },
+  ): Promise<void> {
     return;
   }
 
@@ -149,12 +356,18 @@ export class NoopStreamingTranscriptionProvider implements StreamingTranscriptio
 export class DeepgramStreamingTranscriptionProvider implements StreamingTranscriptionProvider {
   private readonly sessions = new Map<string, DeepgramSession>();
 
-  async startSession(sessionId: string, onSegment: (segment: TranscriptionSegment) => void): Promise<void> {
+  async startSession(
+    sessionId: string,
+    onSegment: (segment: TranscriptionSegment) => void,
+    options?: { attendees?: TranscriptionAttendeeCandidate[]; onTrace?: (trace: SpeakerResolutionTrace) => void },
+  ): Promise<void> {
     this.sessions.set(sessionId, {
       onSegment,
+      onTrace: options?.onTrace,
       microphone: createSourceState(),
       system: createSourceState(),
-      guestSpeakerLabels: new Map<number, string>(),
+      guestParticipants: [],
+      availableAttendeeNames: normalizeAttendeeNames(options?.attendees),
       nextGuestSpeakerOrdinal: 0,
     });
   }
@@ -229,12 +442,18 @@ export class DeepgramStreamingTranscriptionProvider implements StreamingTranscri
     const wavPayload = wrapPcm16AsWav(payload, STREAM_SAMPLE_RATE, CHANNEL_COUNT);
     sourceState.chunks = [];
     sourceState.byteLength = 0;
+    const deepgramConfig = getDeepgramRuntimeConfig();
+
+    if (!deepgramConfig.apiKey) {
+      sourceState.flushing = false;
+      return;
+    }
 
     try {
       const response = await fetch(createDeepgramUrl(), {
         method: "POST",
         headers: {
-          Authorization: `Token ${getDeepgramApiKey()}`,
+          Authorization: `Token ${deepgramConfig.apiKey}`,
           "Content-Type": "audio/wav",
         },
         body: new Uint8Array(wavPayload),
@@ -254,14 +473,31 @@ export class DeepgramStreamingTranscriptionProvider implements StreamingTranscri
         .filter((utterance) => utterance.text.length > 0) ?? [];
 
       if (utterances.length) {
+        const createdAt = new Date().toISOString();
+        const uniqueSpeakerCount = new Set(
+          utterances
+            .map((utterance) => utterance.speakerId)
+            .filter((speakerId): speakerId is number => typeof speakerId === "number"),
+        ).size;
+        const requestSpeakerMap = new Map<number, GuestParticipant | null>();
+
         for (const utterance of utterances) {
+          const speakerIdentity = getSpeakerSegmentIdentity(
+            session,
+            source,
+            utterance.speakerId,
+            createdAt,
+            uniqueSpeakerCount,
+            utterance.text,
+            requestSpeakerMap,
+          );
           session.onSegment({
             source,
-            speakerId: utterance.speakerId,
-            speakerLabel: getSpeakerLabel(session, source, utterance.speakerId),
+            speakerId: speakerIdentity.speakerId,
+            speakerLabel: speakerIdentity.speakerLabel,
             text: utterance.text,
             isFinal: true,
-            createdAt: new Date().toISOString(),
+            createdAt,
           });
         }
         return;
@@ -273,13 +509,15 @@ export class DeepgramStreamingTranscriptionProvider implements StreamingTranscri
       }
 
       console.log(`[deepgram] transcript source=${source} text=${text}`);
+      const createdAt = new Date().toISOString();
+      const speakerIdentity = getSpeakerSegmentIdentity(session, source, null, createdAt, 1, text, new Map());
       session.onSegment({
         source,
-        speakerId: null,
-        speakerLabel: getSpeakerLabel(session, source, null),
+        speakerId: speakerIdentity.speakerId,
+        speakerLabel: speakerIdentity.speakerLabel,
         text,
         isFinal: true,
-        createdAt: new Date().toISOString(),
+        createdAt,
       });
     } catch (error) {
       console.error(`[deepgram] request error source=${source}`, error);
@@ -295,9 +533,5 @@ export class DeepgramStreamingTranscriptionProvider implements StreamingTranscri
 }
 
 export function createStreamingTranscriptionProvider(): StreamingTranscriptionProvider {
-  if (!getDeepgramApiKey()) {
-    return new NoopStreamingTranscriptionProvider();
-  }
-
   return new DeepgramStreamingTranscriptionProvider();
 }

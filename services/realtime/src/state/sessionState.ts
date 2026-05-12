@@ -1,5 +1,6 @@
 import type { CoachingPrompt, CoachingSettings, MeetingContext, SessionStopReason, SessionSummary, TranscriptSegment } from "@listen/shared";
 
+import type { SpeakerResolutionTrace } from "../diagnostics/speakerTrace";
 import { summarizeSession } from "../summary/summarizeSession";
 
 export interface SessionCoachingGuidance {
@@ -9,6 +10,7 @@ export interface SessionCoachingGuidance {
 }
 
 const COACHING_PROMPT_COOLDOWN_MS = Number(process.env.LISTEN_COACHING_PROMPT_COOLDOWN_MS ?? 90_000);
+const MAX_SPEAKER_RESOLUTION_TRACES = 300;
 
 function getEffectivePromptCooldownMs(settings: CoachingSettings): number {
   if (settings.frequency === "minimal") {
@@ -25,6 +27,7 @@ function getEffectivePromptCooldownMs(settings: CoachingSettings): number {
 export class RollingSessionState {
   private readonly transcript: TranscriptSegment[] = [];
   private readonly prompts: CoachingPrompt[] = [];
+  private readonly speakerResolutionTraces: SpeakerResolutionTrace[] = [];
   private readonly recentPromptTimes = new Map<string, number>();
 
   constructor(
@@ -41,6 +44,13 @@ export class RollingSessionState {
 
   appendPrompts(prompts: CoachingPrompt[]): void {
     this.prompts.push(...prompts);
+  }
+
+  appendSpeakerResolutionTrace(trace: SpeakerResolutionTrace): void {
+    this.speakerResolutionTraces.push(trace);
+    if (this.speakerResolutionTraces.length > MAX_SPEAKER_RESOLUTION_TRACES) {
+      this.speakerResolutionTraces.splice(0, this.speakerResolutionTraces.length - MAX_SPEAKER_RESOLUTION_TRACES);
+    }
   }
 
   filterPromptsForEmission(prompts: CoachingPrompt[]): CoachingPrompt[] {
@@ -70,6 +80,10 @@ export class RollingSessionState {
 
   getPrompts(): CoachingPrompt[] {
     return [...this.prompts];
+  }
+
+  getSpeakerResolutionTraces(): SpeakerResolutionTrace[] {
+    return [...this.speakerResolutionTraces];
   }
 
   getMeetingContext(): MeetingContext | null {

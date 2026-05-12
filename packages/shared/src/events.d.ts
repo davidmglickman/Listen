@@ -54,18 +54,24 @@ export declare const DebugTranscriptEventSchema: z.ZodObject<{
     kind: z.ZodLiteral<"debug_transcript">;
     sessionId: z.ZodString;
     source: z.ZodEnum<["system", "microphone"]>;
+    speakerId: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    speakerLabel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     text: z.ZodString;
     createdAt: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     kind: "debug_transcript";
     sessionId: string;
     source: "system" | "microphone";
+    speakerId?: number | null | undefined;
+    speakerLabel?: string | null | undefined;
     createdAt: string;
     text: string;
 }, {
     kind: "debug_transcript";
     sessionId: string;
     source: "system" | "microphone";
+    speakerId?: number | null | undefined;
+    speakerLabel?: string | null | undefined;
     createdAt: string;
     text: string;
 }>;

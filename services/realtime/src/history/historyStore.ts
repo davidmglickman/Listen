@@ -110,6 +110,11 @@ export class HistoryStore {
         mime_type TEXT,
         updated_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS runtime_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
     `);
     this.ensureColumn("transcript_segments", "speaker_id", "INTEGER");
     this.ensureColumn("transcript_segments", "speaker_label", "TEXT");
@@ -118,6 +123,19 @@ export class HistoryStore {
     this.ensureColumn("coaching_profiles", "settings_json", "TEXT");
     this.ensureColumn("org_context_documents", "source_url", "TEXT");
     this.seedDefaults();
+  }
+
+  readRuntimeSecrets(): { aiApiKey: string | null; deepgramApiKey: string | null } {
+    return {
+      aiApiKey: this.readRuntimeSetting("ai_api_key"),
+      deepgramApiKey: this.readRuntimeSetting("deepgram_api_key"),
+    };
+  }
+
+  writeRuntimeSecrets(value: { aiApiKey: string | null; deepgramApiKey: string | null }): { aiApiKey: string | null; deepgramApiKey: string | null } {
+    this.writeRuntimeSetting("ai_api_key", value.aiApiKey);
+    this.writeRuntimeSetting("deepgram_api_key", value.deepgramApiKey);
+    return this.readRuntimeSecrets();
   }
 
   listSessions(limit = 50): SessionHistoryItem[] {
@@ -350,6 +368,22 @@ export class HistoryStore {
     }
 
     this.database.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+
+  private readRuntimeSetting(key: string): string | null {
+    const row = this.database.prepare("SELECT value FROM runtime_settings WHERE key = ?").get(key) as { value: string | null } | undefined;
+    if (!row || typeof row.value !== "string") {
+      return null;
+    }
+
+    const normalized = row.value.trim();
+    return normalized || null;
+  }
+
+  private writeRuntimeSetting(key: string, value: string | null): void {
+    this.database.prepare(
+      "INSERT INTO runtime_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(key, value?.trim() || null);
   }
 
   private seedDefaults(): void {

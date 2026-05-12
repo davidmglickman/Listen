@@ -34,6 +34,8 @@ exports.DebugTranscriptEventSchema = zod_1.z.object({
     kind: zod_1.z.literal("debug_transcript"),
     sessionId: zod_1.z.string(),
     source: AudioSourceKindSchema,
+    speakerId: zod_1.z.number().int().nullable().optional(),
+    speakerLabel: zod_1.z.string().nullable().optional(),
     text: zod_1.z.string().min(1),
     createdAt: zod_1.z.string(),
 });

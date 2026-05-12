@@ -2,6 +2,45 @@ import type { CalendarSyncRequest, MeetingAttendee, MeetingRecord } from "@liste
 
 import { fetchWithTimeout } from "../http/fetchWithTimeout";
 
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function normalizeOptionalEmail(value: string | undefined): string | undefined {
+  const normalized = normalizeOptionalText(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : undefined;
+}
+
+function normalizeOptionalUrl(value: string | undefined): string | undefined {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  try {
+    return new URL(normalized).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeMeetingAttendee(attendee: MeetingAttendee): MeetingAttendee {
+  return {
+    fullName: attendee.fullName.trim() || "Guest",
+    email: normalizeOptionalEmail(attendee.email),
+    title: normalizeOptionalText(attendee.title),
+    linkedInUrl: normalizeOptionalUrl(attendee.linkedInUrl),
+    organizationDomain: normalizeOptionalText(attendee.organizationDomain)?.toLowerCase(),
+    organizationName: normalizeOptionalText(attendee.organizationName),
+    role: attendee.role,
+  };
+}
+
 function uniqueAttendees(attendees: MeetingAttendee[]): MeetingAttendee[] {
   const seen = new Set<string>();
   return attendees.filter((attendee) => {
@@ -34,21 +73,24 @@ export class CalendarSyncClient {
   }
 
   private async syncMeeting(meeting: MeetingRecord): Promise<void> {
-    const organizerDomain = inferOrganizationDomain(meeting);
+    const organizerEmail = normalizeOptionalEmail(meeting.organizerEmail);
+    const organizerDomain = organizerEmail?.split("@")[1]?.toLowerCase() ?? inferOrganizationDomain(meeting);
     const attendees = uniqueAttendees(
-      (meeting.attendees ?? []).map((attendee) => ({
-        fullName: attendee.fullName,
-        email: attendee.email,
-        title: attendee.title,
-        linkedInUrl: attendee.linkedInUrl,
-        organizationDomain: attendee.organizationDomain,
-        organizationName: attendee.organizationName,
-        role: attendee.email && attendee.email === meeting.organizerEmail
-          ? "host"
-          : attendee.organizationDomain && organizerDomain && attendee.organizationDomain === organizerDomain
-            ? "internal"
-            : "guest",
-      })),
+      (meeting.attendees ?? [])
+        .map((attendee): MeetingAttendee => ({
+          fullName: attendee.fullName,
+          email: attendee.email,
+          title: attendee.title,
+          linkedInUrl: attendee.linkedInUrl,
+          organizationDomain: attendee.organizationDomain,
+          organizationName: attendee.organizationName,
+          role: attendee.email && organizerEmail && attendee.email.trim().toLowerCase() === organizerEmail
+            ? "host"
+            : attendee.organizationDomain && organizerDomain && attendee.organizationDomain === organizerDomain
+              ? "internal"
+              : "guest",
+        }))
+        .map(normalizeMeetingAttendee),
     );
 
     const payload: CalendarSyncRequest = {
@@ -62,9 +104,9 @@ export class CalendarSyncClient {
         startsAt: meeting.startsAt,
         endsAt: meeting.endsAt,
         source: "calendar",
-        organizerEmail: meeting.organizerEmail,
-        joinUrl: meeting.joinUrl,
-        notes: meeting.notes,
+        organizerEmail,
+        joinUrl: normalizeOptionalUrl(meeting.joinUrl),
+        notes: normalizeOptionalText(meeting.notes),
         context: null,
       },
       attendees,
@@ -79,7 +121,8 @@ export class CalendarSyncClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Calendar sync failed with status ${response.status}`);
+      const body = await response.text();
+      throw new Error(`Calendar sync failed with status ${response.status}${body ? `: ${body}` : ""}`);
     }
   }
 }

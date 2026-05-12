@@ -2,6 +2,8 @@ import type { CoachingSettings, MeetingContext } from "@listen/shared";
 
 export type CoachingRuleType = "filler" | "long_answer";
 
+import { getAiRuntimeConfig } from "../runtime/runtimeSecrets";
+
 export interface CoachingMessageContext {
   meetingContext?: MeetingContext | null;
   orgGuidance?: string | null;
@@ -10,11 +12,7 @@ export interface CoachingMessageContext {
 }
 
 function getAiConfig(): { apiKey: string | null; model: string; baseUrl: string } {
-  return {
-    apiKey: process.env.LISTEN_AI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || null,
-    model: process.env.LISTEN_AI_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
-    baseUrl: process.env.LISTEN_AI_BASE_URL?.trim() || "https://api.openai.com/v1",
-  };
+  return getAiRuntimeConfig();
 }
 
 function summarizeGuidance(label: string, guidance: string | null | undefined): string {

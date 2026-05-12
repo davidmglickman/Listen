@@ -19,6 +19,8 @@ export function parseMeetingLink(joinUrl: string): { provider: MeetingProvider; 
 }
 
 export function extractMeetingLink(...fields: Array<string | null | undefined>): string | null {
+  let fallbackUrl: string | null = null;
+
   for (const field of fields) {
     if (!field) {
       continue;
@@ -29,8 +31,12 @@ export function extractMeetingLink(...fields: Array<string | null | undefined>):
       if (match.includes("meet.google.com") || match.includes("teams.microsoft.com") || match.includes("zoom.us")) {
         return match;
       }
+
+      if (!fallbackUrl) {
+        fallbackUrl = match;
+      }
     }
   }
 
-  return null;
+  return fallbackUrl;
 }

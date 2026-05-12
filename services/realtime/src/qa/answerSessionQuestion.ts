@@ -2,11 +2,13 @@ import type {
   CoachingPrompt,
   CoachingSettings,
   MeetingContext,
-  OrgContextDocument,
   SessionQuestionAnswer,
   SessionSummary,
   TranscriptSegment,
 } from "@listen/shared";
+
+import { selectQuestionRelevantTopics } from "../conversation/topics";
+import { getAiRuntimeConfig } from "../runtime/runtimeSecrets";
 
 export interface SessionQuestionContext {
   meetingTitle: string;
@@ -16,12 +18,14 @@ export interface SessionQuestionContext {
   coaching: CoachingPrompt[];
 }
 
+export interface QuestionContextDocument {
+  title: string;
+  sourceUrl?: string | null;
+  content: string;
+}
+
 function getAiConfig(): { apiKey: string | null; model: string; baseUrl: string } {
-  return {
-    apiKey: process.env.LISTEN_AI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || null,
-    model: process.env.LISTEN_AI_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
-    baseUrl: process.env.LISTEN_AI_BASE_URL?.trim() || "https://api.openai.com/v1",
-  };
+  return getAiRuntimeConfig();
 }
 
 function clipText(value: string, maxLength: number): string {
@@ -33,19 +37,30 @@ function clipText(value: string, maxLength: number): string {
   return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
-function formatTranscriptWindow(transcript: TranscriptSegment[]): Array<{ speaker: string; text: string; createdAt: string }> {
-  return transcript
-    .filter((segment) => segment.text.trim().length > 0)
-    .slice(-160)
-    .map((segment) => ({
-      speaker: segment.speakerLabel || segment.source,
-      text: clipText(segment.text, 400),
-      createdAt: segment.createdAt,
+function formatTopicWindow(question: string, transcript: TranscriptSegment[]): Array<{
+  title: string;
+  startedAt: string;
+  endedAt: string;
+  keywords: string[];
+  turns: Array<{ speaker: string; text: string; startedAt: string; endedAt: string }>;
+}> {
+  return selectQuestionRelevantTopics(transcript, question)
+    .map((topic) => ({
+      title: topic.title,
+      startedAt: topic.startedAt,
+      endedAt: topic.endedAt,
+      keywords: topic.keywords,
+      turns: topic.turns.map((turn) => ({
+        speaker: turn.speakerLabel || turn.source,
+        text: clipText(turn.text, 500),
+        startedAt: turn.startedAt,
+        endedAt: turn.endedAt,
+      })),
     }));
 }
 
 function formatPromptWindow(prompts: CoachingPrompt[]): Array<{ title: string; message: string; speaker: string | null; createdAt: string }> {
-  return prompts.slice(0, 20).map((prompt) => ({
+  return prompts.slice(-20).map((prompt) => ({
     title: prompt.title,
     message: clipText(prompt.message, 280),
     speaker: prompt.speakerLabel || null,
@@ -53,7 +68,7 @@ function formatPromptWindow(prompts: CoachingPrompt[]): Array<{ title: string; m
   }));
 }
 
-function formatDocumentWindow(documents: OrgContextDocument[]): Array<{ title: string; sourceUrl: string | null; content: string }> {
+function formatDocumentWindow(documents: QuestionContextDocument[]): Array<{ title: string; sourceUrl: string | null; content: string }> {
   return documents.slice(0, 12).map((document) => ({
     title: document.title,
     sourceUrl: document.sourceUrl ?? null,
@@ -65,7 +80,7 @@ async function requestAiAnswer(payload: {
   question: string;
   session: SessionQuestionContext;
   guidance: { orgGuidance: string | null; userGuidance: string | null; settings: CoachingSettings };
-  documents: OrgContextDocument[];
+  documents: QuestionContextDocument[];
 }): Promise<SessionQuestionAnswer> {
   const aiConfig = getAiConfig();
   if (!aiConfig.apiKey) {
@@ -85,7 +100,7 @@ async function requestAiAnswer(payload: {
         {
           role: "system",
           content:
-            "You answer questions about a meeting using only the supplied meeting transcript, summary, coaching notes, meeting brief, and org context. Respond with strict JSON only containing answer and evidence. If the answer is not supported by the provided material, say that directly instead of guessing.",
+            "You answer questions about a meeting using only the supplied material. Prioritize the most meeting-specific evidence first: transcript, explicit meeting notes, research, email history, prior related sessions, and Drive transcript documents. Treat the meeting brief as a lightweight default, not the main source of truth, when richer meeting-specific background exists. For questions like 'what is this call about?', 'what's the background here?', or 'what are we walking into?', answer in plain language using the agenda, participants, prior communication, research, and notes. Do not answer with only call function, call type, call goal, or desired outcome unless that is all the evidence you have. Use org context only when the question is about company/product messaging or when the meeting-specific material does not answer the question. Respond with strict JSON only containing answer and evidence. If the answer is not supported by the provided material, say that directly instead of guessing.",
         },
         {
           role: "user",
@@ -97,7 +112,7 @@ async function requestAiAnswer(payload: {
             coachingGuidance: payload.guidance,
             orgDocuments: formatDocumentWindow(payload.documents),
             coachingPrompts: formatPromptWindow(payload.session.coaching),
-            transcript: formatTranscriptWindow(payload.session.transcript),
+            conversationTopics: formatTopicWindow(payload.question, payload.session.transcript),
           }),
         },
       ],
@@ -155,7 +170,7 @@ export async function answerSessionQuestion(payload: {
   question: string;
   session: SessionQuestionContext;
   guidance: { orgGuidance: string | null; userGuidance: string | null; settings: CoachingSettings };
-  documents: OrgContextDocument[];
+  documents: QuestionContextDocument[];
 }): Promise<SessionQuestionAnswer> {
   return requestAiAnswer(payload);
 }

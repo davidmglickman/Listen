@@ -65,6 +65,16 @@ export class AutoStopController extends EventEmitter {
     this.evaluate();
   }
 
+  dismissPendingStop(): void {
+    if (!this.activeSessionId) {
+      return;
+    }
+
+    this.lastAudioActivityAt = Date.now();
+    this.meetingWindowClosedAt = null;
+    this.providerEndStateAt = null;
+  }
+
   trigger(reason: SessionStopReason): void {
     if (!this.activeSessionId) {
       return;

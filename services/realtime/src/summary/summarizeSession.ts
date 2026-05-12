@@ -1,7 +1,15 @@
 import type { CoachingPrompt, CoachingSettings, MeetingContext, SessionSummary, TranscriptSegment } from "@listen/shared";
 
+import { buildConversationTopics } from "../conversation/topics";
+import { buildConversationTurns } from "../conversation/turns";
+import { getAiRuntimeConfig } from "../runtime/runtimeSecrets";
+
 function formatSpeakerPrefix(segment: TranscriptSegment): string {
   return segment.speakerLabel ? `${segment.speakerLabel}: ` : "";
+}
+
+function formatTurnPrefix(speakerLabel: string | null): string {
+  return speakerLabel ? `${speakerLabel}: ` : "";
 }
 
 function formatPromptTitle(prompt: CoachingPrompt): string {
@@ -13,16 +21,16 @@ function buildFallbackSummary(
   transcript: TranscriptSegment[],
   prompts: CoachingPrompt[],
 ): SessionSummary {
-  const nonEmptySegments = transcript.filter((segment) => segment.text.trim().length > 0);
-  const headlineSegment = nonEmptySegments.at(-1);
-  const headline = headlineSegment
-    ? `${formatSpeakerPrefix(headlineSegment)}${headlineSegment.text}`
+  const turns = buildConversationTurns(transcript);
+  const headlineTurn = turns.at(-1);
+  const headline = headlineTurn
+    ? `${formatTurnPrefix(headlineTurn.speakerLabel)}${headlineTurn.text}`
     : "Meeting ended with no transcript content yet.";
 
   return {
     sessionId,
     headline,
-    decisions: nonEmptySegments.slice(0, 2).map((segment) => `${formatSpeakerPrefix(segment)}${segment.text}`),
+    decisions: turns.slice(-3).map((turn) => `${formatTurnPrefix(turn.speakerLabel)}${turn.text}`),
     actionItems: [],
     openQuestions: [],
     coachingRecap: prompts.slice(-3).map((prompt) => formatPromptTitle(prompt)),
@@ -31,11 +39,7 @@ function buildFallbackSummary(
 }
 
 function getAiConfig(): { apiKey: string | null; model: string; baseUrl: string } {
-  return {
-    apiKey: process.env.LISTEN_AI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || null,
-    model: process.env.LISTEN_AI_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
-    baseUrl: process.env.LISTEN_AI_BASE_URL?.trim() || "https://api.openai.com/v1",
-  };
+  return getAiRuntimeConfig();
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -75,13 +79,27 @@ async function buildAiSummary(
     return null;
   }
 
-  const transcriptWindow = transcript
-    .filter((segment) => segment.text.trim().length > 0)
-    .slice(-80)
-    .map((segment) => ({
-      speaker: segment.speakerLabel || segment.source,
-      text: segment.text,
-      createdAt: segment.createdAt,
+  const transcriptWindow = buildConversationTurns(transcript)
+    .slice(-20)
+    .map((turn) => ({
+      speaker: turn.speakerLabel || turn.source,
+      text: turn.text,
+      startedAt: turn.startedAt,
+      endedAt: turn.endedAt,
+    }));
+  const topicWindow = buildConversationTopics(transcript)
+    .slice(-6)
+    .map((topic) => ({
+      title: topic.title,
+      startedAt: topic.startedAt,
+      endedAt: topic.endedAt,
+      keywords: topic.keywords,
+      turns: topic.turns.map((turn) => ({
+        speaker: turn.speakerLabel || turn.source,
+        text: turn.text,
+        startedAt: turn.startedAt,
+        endedAt: turn.endedAt,
+      })),
     }));
   const promptWindow = prompts.slice(-10).map((prompt) => ({
     speaker: prompt.speakerLabel || null,
@@ -110,7 +128,8 @@ async function buildAiSummary(
           content: JSON.stringify({
             meetingContext,
             coachingGuidance: guidance,
-            transcript: transcriptWindow,
+            recentTranscript: transcriptWindow,
+            conversationTopics: topicWindow,
             coachingPrompts: promptWindow,
           }),
         },

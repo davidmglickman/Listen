@@ -1,5 +1,6 @@
 import type { ResearchSnapshot } from "@listen/shared";
 
+import { getAiRuntimeConfig } from "../runtime/runtimeSecrets";
 import type { ResearchJobWorkItem } from "../supabase/syncService";
 
 export interface ResearchProvider {
@@ -84,11 +85,7 @@ export class ManualResearchProvider implements ResearchProvider {
 }
 
 function getAiConfig(): { apiKey: string | null; model: string; baseUrl: string } {
-  return {
-    apiKey: process.env.LISTEN_AI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || null,
-    model: process.env.LISTEN_AI_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
-    baseUrl: process.env.LISTEN_AI_BASE_URL?.trim() || "https://api.openai.com/v1",
-  };
+  return getAiRuntimeConfig();
 }
 
 function normalizeUrlArray(values: unknown): string[] {

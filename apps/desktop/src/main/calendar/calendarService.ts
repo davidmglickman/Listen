@@ -153,6 +153,26 @@ export class CalendarService {
     return meeting;
   }
 
+  createInstantMeeting(): MeetingRecord {
+    const startsAt = new Date();
+    const endsAt = new Date(startsAt.getTime() + 30 * 60_000);
+
+    const meeting: MeetingRecord = {
+      id: randomUUID(),
+      title: "Instant meeting",
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      joinUrl: "",
+      provider: "generic",
+      calendarProvider: "mock",
+      launchStrategy: "browser",
+      notes: "Auto-created by Listen from sustained microphone activity when no scheduled meeting was available.",
+    };
+
+    this.mockMeetings.push(meeting);
+    return meeting;
+  }
+
   dismissMeeting(meetingId: string): void {
     const mockIndex = this.mockMeetings.findIndex((meeting) => meeting.id === meetingId);
     if (mockIndex >= 0) {

@@ -42,6 +42,13 @@ export interface StoredMeetingLaunchContext {
   context: MeetingContext;
 }
 
+export interface StoredRuntimeSecrets {
+  aiApiKey: string;
+  transcriptionApiKey: string;
+}
+
+export type DesktopCloseBehavior = "ask" | "tray" | "quit";
+
 export class SessionStore {
   private readonly database: DatabaseSync;
 
@@ -136,6 +143,30 @@ export class SessionStore {
 
   async writeMeetingLaunchContext(meetingId: string, payload: StoredMeetingLaunchContext): Promise<void> {
     this.writeSetting(`meeting_launch_context:${meetingId}`, payload);
+  }
+
+  async readRuntimeSecrets(): Promise<StoredRuntimeSecrets> {
+    const value = this.readSetting<StoredRuntimeSecrets>("runtime_secrets");
+    return {
+      aiApiKey: typeof value?.aiApiKey === "string" ? value.aiApiKey : "",
+      transcriptionApiKey: typeof value?.transcriptionApiKey === "string" ? value.transcriptionApiKey : "",
+    };
+  }
+
+  async writeRuntimeSecrets(value: StoredRuntimeSecrets): Promise<void> {
+    this.writeSetting("runtime_secrets", {
+      aiApiKey: value.aiApiKey,
+      transcriptionApiKey: value.transcriptionApiKey,
+    });
+  }
+
+  async readDesktopCloseBehavior(): Promise<DesktopCloseBehavior> {
+    const value = this.readSetting<DesktopCloseBehavior>("desktop_close_behavior");
+    return value === "tray" || value === "quit" ? value : "ask";
+  }
+
+  async writeDesktopCloseBehavior(value: DesktopCloseBehavior): Promise<void> {
+    this.writeSetting("desktop_close_behavior", value);
   }
 
   async writeCompletedSession(record: CompletedSessionRecord): Promise<void> {

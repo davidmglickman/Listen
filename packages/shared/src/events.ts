@@ -23,6 +23,11 @@ export const MeetingContextSchema = z.object({
   notes: z.string(),
 });
 
+const MeetingAttendeeEventSchema = z.object({
+  fullName: z.string().min(1),
+  email: z.string().optional(),
+});
+
 export const SessionStartEventSchema = z.object({
   kind: z.literal("session_start"),
   sessionId: z.string(),
@@ -32,6 +37,7 @@ export const SessionStartEventSchema = z.object({
   meetingProvider: MeetingProviderSchema,
   calendarProvider: CalendarProviderSchema,
   meetingContext: MeetingContextSchema.nullable(),
+  attendees: z.array(MeetingAttendeeEventSchema).optional(),
 });
 
 export const SessionStopEventSchema = z.object({
@@ -53,6 +59,8 @@ export const DebugTranscriptEventSchema = z.object({
   kind: z.literal("debug_transcript"),
   sessionId: z.string(),
   source: AudioSourceKindSchema,
+  speakerId: z.number().int().nullable().optional(),
+  speakerLabel: z.string().nullable().optional(),
   text: z.string().min(1),
   createdAt: z.string(),
 });
