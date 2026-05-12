@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, session, shell, Tray, utilityProcess } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, Notification, session, shell, Tray, utilityProcess } from "electron";
 import type { MessageBoxOptions } from "electron";
 import dotenv from "dotenv";
 import { autoUpdater } from "electron-updater";
@@ -148,6 +148,8 @@ let embeddedRealtimeProcess: Electron.UtilityProcess | null = null;
 
 const minimumUpdaterCheckingDurationMs = 1000;
 const embeddedRealtimeStartupTimeoutMs = 15_000;
+const updaterStartupCheckDelayMs = 60_000;
+const updaterPeriodicCheckIntervalMs = 4 * 60 * 60_000;
 
 let updaterState: DesktopUpdaterState = {
   enabled: updateProvider !== "none",
@@ -162,6 +164,11 @@ let updaterState: DesktopUpdaterState = {
       ? "Ready to check for updates."
       : "Set LISTEN_UPDATE_GITHUB_OWNER and LISTEN_UPDATE_GITHUB_REPO, or LISTEN_UPDATE_FEED_URL, to enable desktop app updates.",
 };
+
+let updaterStartupCheckTimeout: NodeJS.Timeout | null = null;
+let updaterPeriodicCheckInterval: NodeJS.Timeout | null = null;
+let lastAvailableUpdateNotificationVersion: string | null = null;
+let lastDownloadedUpdateNotificationVersion: string | null = null;
 
 const meetingScheduler = new MeetingScheduler(popupLeadMinutes);
 const autoStopController = new AutoStopController();
@@ -686,6 +693,44 @@ function setUpdaterState(patch: Partial<DesktopUpdaterState>): DesktopUpdaterSta
   return broadcastUpdaterState();
 }
 
+function showDesktopUpdateNotification(title: string, body: string): void {
+  if (!Notification.isSupported()) {
+    return;
+  }
+
+  const notification = new Notification({
+    title,
+    body,
+    silent: false,
+  });
+  notification.on("click", () => {
+    showMainWindow();
+  });
+  notification.show();
+}
+
+function schedulePeriodicUpdateChecks(): void {
+  if (!updaterConfigured) {
+    return;
+  }
+
+  if (updaterStartupCheckTimeout) {
+    clearTimeout(updaterStartupCheckTimeout);
+  }
+  if (updaterPeriodicCheckInterval) {
+    clearInterval(updaterPeriodicCheckInterval);
+  }
+
+  updaterStartupCheckTimeout = setTimeout(() => {
+    updaterStartupCheckTimeout = null;
+    void checkForDesktopUpdates();
+  }, updaterStartupCheckDelayMs);
+
+  updaterPeriodicCheckInterval = setInterval(() => {
+    void checkForDesktopUpdates();
+  }, updaterPeriodicCheckIntervalMs);
+}
+
 function configureAutoUpdater(): void {
   if (updaterConfigured) {
     return;
@@ -741,14 +786,23 @@ function configureAutoUpdater(): void {
   });
 
   autoUpdater.on("update-available", (info) => {
+    const version = info.version ?? null;
     setUpdaterState({
       enabled: true,
       availability: "available",
-      availableVersion: info.version ?? null,
+      availableVersion: version,
       checkedAt: new Date().toISOString(),
       progress: 0,
-      message: `Update ${info.version ?? "available"} found. Downloading now...`,
+      message: `Update ${version ?? "available"} found. Downloading now...`,
     });
+
+    if (version && version !== lastAvailableUpdateNotificationVersion) {
+      lastAvailableUpdateNotificationVersion = version;
+      showDesktopUpdateNotification(
+        "Listen update available",
+        `Version ${version} is available and is downloading in the background.`,
+      );
+    }
   });
 
   autoUpdater.on("download-progress", (progress) => {
@@ -773,6 +827,14 @@ function configureAutoUpdater(): void {
         ? `Update ${version} is ready. Install when you are ready to restart.`
         : "An update is ready. Install when you are ready to restart.",
     });
+
+    if (version && version !== lastDownloadedUpdateNotificationVersion) {
+      lastDownloadedUpdateNotificationVersion = version;
+      showDesktopUpdateNotification(
+        "Listen update ready",
+        `Version ${version} has been downloaded and is ready to install.`,
+      );
+    }
   });
 
   autoUpdater.on("update-not-available", () => {
@@ -801,6 +863,8 @@ function configureAutoUpdater(): void {
     availability: "idle",
     message: updateProvider === "github" ? "Ready to check GitHub Releases for updates." : "Ready to check for updates.",
   });
+
+  schedulePeriodicUpdateChecks();
 }
 
 async function checkForDesktopUpdates(): Promise<DesktopUpdaterState> {
@@ -2375,6 +2439,14 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  if (updaterStartupCheckTimeout) {
+    clearTimeout(updaterStartupCheckTimeout);
+    updaterStartupCheckTimeout = null;
+  }
+  if (updaterPeriodicCheckInterval) {
+    clearInterval(updaterPeriodicCheckInterval);
+    updaterPeriodicCheckInterval = null;
+  }
   embeddedRealtimeProcess?.kill();
   embeddedRealtimeProcess = null;
 });
