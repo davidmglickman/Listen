@@ -866,6 +866,10 @@
         align-content: start;
       }
 
+      .review-detail-tabs {
+        align-self: start;
+      }
+
       .review-focus-card {
         display: grid;
         gap: 20px;
@@ -1928,12 +1932,6 @@
               <div class="eyebrow">Review</div>
               <h2>Past Meetings</h2>
               <p class="muted">Browse past meetings, inspect the transcript and coaching detail, and ask follow-up questions against any saved meeting.</p>
-              <div class="workspace-tabs">
-                <button class="workspace-tab active" data-review-tab="history">History</button>
-                <button class="workspace-tab" data-review-tab="transcript">Transcript</button>
-                <button class="workspace-tab" data-review-tab="coaching">Coaching</button>
-                <button class="workspace-tab" data-review-tab="qa">Q&A</button>
-              </div>
             </div>
             <div class="review-layout">
               <div class="card review-history-panel">
@@ -1968,6 +1966,12 @@
                 <div id="review-session-list" class="review-session-list"></div>
               </div>
               <div class="review-detail-stack">
+                <div class="workspace-tabs review-detail-tabs">
+                  <button class="workspace-tab active" data-review-tab="history">History</button>
+                  <button class="workspace-tab" data-review-tab="transcript">Transcript</button>
+                  <button class="workspace-tab" data-review-tab="coaching">Coaching</button>
+                  <button class="workspace-tab" data-review-tab="qa">Q&A</button>
+                </div>
                 <div id="review-panel-history" class="workspace-panel active">
                   <div id="review-session-detail" class="card review-focus-card"></div>
                 </div>
