@@ -751,8 +751,8 @@
 
       .review-layout {
         display: grid;
-        grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
-        gap: 20px;
+        grid-template-columns: minmax(340px, 400px) minmax(0, 1fr);
+        gap: 24px;
         align-items: start;
       }
 
@@ -761,6 +761,7 @@
         gap: 16px;
         position: sticky;
         top: 28px;
+        align-content: start;
       }
 
       .review-session-list {
@@ -773,8 +774,8 @@
 
       .review-session-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 8px;
+        grid-template-columns: minmax(0, 1fr) 120px;
+        gap: 12px;
         align-items: stretch;
       }
 
@@ -807,13 +808,17 @@
       }
 
       .review-session-delete {
-        align-self: center;
+        align-self: stretch;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         padding-inline: 12px;
       }
 
       .review-detail-stack {
         display: grid;
         gap: 20px;
+        align-content: start;
       }
 
       .review-focus-card {
@@ -825,13 +830,34 @@
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
-        gap: 16px;
+        gap: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border);
       }
 
       .review-session-header-actions {
         display: grid;
         justify-items: end;
         gap: 12px;
+        min-width: 220px;
+      }
+
+      .review-session-header-actions .page-chip-row {
+        justify-content: flex-end;
+      }
+
+      .review-delete-button {
+        background: var(--danger-soft);
+        color: #991b1b;
+        border: 1px solid rgba(239, 68, 68, 0.28);
+        box-shadow: none;
+      }
+
+      .review-delete-button:hover {
+        background: #fecaca;
+        color: #7f1d1d;
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-soft);
       }
 
       .review-summary-grid {
@@ -4869,7 +4895,7 @@
                       <div class="meta-line">${escapeHtml(formatDate(session.completedAt))}</div>
                       <div class="muted">${escapeHtml(session.summary?.headline || "No summary headline")}</div>
                     </button>
-                    <button class="secondary review-session-delete" data-delete-review-session-id="${escapeHtml(session.sessionId)}">Delete</button>
+                    <button class="secondary review-session-delete review-delete-button" data-delete-review-session-id="${escapeHtml(session.sessionId)}">Delete Meeting</button>
                   </div>
                 `).join("")
               : sessionsState.items.length
@@ -4944,7 +4970,7 @@
                 <span class="page-chip">${escapeHtml(selectedSession.stopReason.replaceAll("_", " "))}</span>
               </div>
               <div class="meeting-actions">
-                <button class="secondary" data-delete-selected-review-session-id="${escapeHtml(selectedSession.sessionId)}">Delete This Call</button>
+                <button class="secondary review-delete-button" data-delete-selected-review-session-id="${escapeHtml(selectedSession.sessionId)}">Delete Meeting</button>
               </div>
             </div>
           </div>
