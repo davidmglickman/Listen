@@ -171,6 +171,12 @@ let lastAvailableUpdateNotificationVersion: string | null = null;
 let lastDownloadedUpdateNotificationVersion: string | null = null;
 let pendingQuitAfterSessionFinalize = false;
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 const meetingScheduler = new MeetingScheduler(popupLeadMinutes);
 const autoStopController = new AutoStopController();
 
@@ -2466,6 +2472,17 @@ app.on("before-quit", (event) => {
 app.on("activate", () => {
   if (!mainWindow || mainWindow.isDestroyed()) {
     createControlWindow();
+    return;
+  }
+
+  showMainWindow();
+});
+
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (app.isReady()) {
+      createControlWindow();
+    }
     return;
   }
 
