@@ -152,9 +152,9 @@
       }
 
       .nav-button.active {
-        background: var(--surface-muted);
-        color: var(--brand);
-        border-color: var(--border);
+        background: #dcfce7;
+        color: #166534;
+        border-color: #86efac;
       }
 
       .nav-button strong {
@@ -2374,10 +2374,16 @@
       }
 
       function syncPageVisibility() {
+        const hasActiveSession = Boolean(state.snapshot?.activeSession);
+
         pages.forEach((page) => {
+          const isCallPage = page.getAttribute("data-page") === "call";
+          page.hidden = isCallPage && !hasActiveSession;
           page.classList.toggle("active", page.getAttribute("data-page") === state.currentPage);
         });
         navButtons.forEach((button) => {
+          const isCallButton = button.getAttribute("data-page") === "call";
+          button.hidden = isCallButton && !hasActiveSession;
           button.classList.toggle("active", button.getAttribute("data-page") === state.currentPage);
         });
       }
@@ -2411,6 +2417,10 @@
       }
 
       function setCurrentPage(page) {
+        if (page === "call" && !state.snapshot?.activeSession) {
+          page = "today";
+        }
+
         state.currentPage = page;
         state.lastAutoPage = page;
         syncPageVisibility();
