@@ -14,6 +14,25 @@ interface GoogleProfileResponse {
   name?: string;
 }
 
+function formatGoogleOAuthError(prefix: string, status: number, body: string): string {
+  const trimmedBody = body.trim();
+  if (!trimmedBody) {
+    return `${prefix} failed with status ${status}`;
+  }
+
+  try {
+    const payload = JSON.parse(trimmedBody) as {
+      error?: string;
+      error_description?: string;
+      error_uri?: string;
+    };
+    const detail = [payload.error, payload.error_description, payload.error_uri].filter(Boolean).join(" | ");
+    return detail ? `${prefix} failed with status ${status}: ${detail}` : `${prefix} failed with status ${status}: ${trimmedBody}`;
+  } catch {
+    return `${prefix} failed with status ${status}: ${trimmedBody}`;
+  }
+}
+
 export class GoogleOAuthClient {
   private readonly clientId = process.env.GOOGLE_CLIENT_ID?.trim() ?? "";
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
@@ -69,7 +88,7 @@ export class GoogleOAuthClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Google token exchange failed with status ${response.status}`);
+      throw new Error(formatGoogleOAuthError("Google token exchange", response.status, await response.text()));
     }
 
     const payload = (await response.json()) as GoogleTokenResponse;
@@ -98,7 +117,7 @@ export class GoogleOAuthClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Google token refresh failed with status ${response.status}`);
+      throw new Error(formatGoogleOAuthError("Google token refresh", response.status, await response.text()));
     }
 
     const payload = (await response.json()) as GoogleTokenResponse;

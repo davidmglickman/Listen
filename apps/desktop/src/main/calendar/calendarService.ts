@@ -218,9 +218,18 @@ export class CalendarService {
     ];
   }
 
-  private async handleTokenRefreshFailure(provider: "google" | "microsoft", error: unknown): Promise<StoredOAuthToken | null> {
+  private async handleTokenRefreshFailure(
+    provider: "google" | "microsoft",
+    token: StoredOAuthToken,
+    error: unknown,
+  ): Promise<StoredOAuthToken | null> {
     const message = error instanceof Error ? error.message : String(error);
-    if (!/status 400\b/i.test(message) && !/invalid[_ ]grant/i.test(message)) {
+    if (provider === "google") {
+      console.warn("Preserving saved Google auth after refresh failure.", message);
+      return token;
+    }
+
+    if (!/invalid[_ ]grant/i.test(message)) {
       throw error;
     }
 
@@ -278,7 +287,7 @@ export class CalendarService {
           ? await this.googleOAuthClient.refreshAccessToken(refreshToken)
           : await this.microsoftOAuthClient.refreshAccessToken(refreshToken);
       } catch (error) {
-        return this.handleTokenRefreshFailure(provider, error);
+        return this.handleTokenRefreshFailure(provider, token, error);
       }
     })();
 
