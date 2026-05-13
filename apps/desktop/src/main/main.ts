@@ -2058,6 +2058,10 @@ async function finalizeSessionLocally(reason: SessionStopReason): Promise<AppSna
       context: completedContext,
     });
   }
+  if (completedMeeting?.calendarProvider === "mock" && !completedMeeting.joinUrl) {
+    calendarService.dismissMeeting(completedMeeting.id);
+    meetingScheduler.setMeetings(calendarService.getUpcomingMeetings());
+  }
   activeMeetingRecord = null;
   activeMeetingContext = null;
   realtimeClient?.dispose();

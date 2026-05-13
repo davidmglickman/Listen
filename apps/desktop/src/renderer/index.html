@@ -5074,6 +5074,26 @@
               <p class="muted">Choose a saved meeting from the left to inspect its transcript, summary, and coaching history.</p>
             </div>
           `;
+          reviewTranscriptDetailEl.innerHTML = `
+            <div class="card-header">
+              <div>
+                <div class="eyebrow">Transcript</div>
+                <h3>No meeting selected</h3>
+                <p class="muted">Choose a saved meeting to inspect its transcript.</p>
+              </div>
+            </div>
+            <div class="section-empty">No transcript to show.</div>
+          `;
+          reviewCoachingDetailEl.innerHTML = `
+            <div class="card-header">
+              <div>
+                <div class="eyebrow">Coaching</div>
+                <h3>No meeting selected</h3>
+                <p class="muted">Choose a saved meeting to inspect saved coaching prompts.</p>
+              </div>
+            </div>
+            <div class="section-empty">No coaching detail to show.</div>
+          `;
           return;
         }
 
