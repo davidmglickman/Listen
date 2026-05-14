@@ -1204,6 +1204,39 @@ async function saveDesktopTranslationRuntimeSettings(value: StoredTranslationRun
   return normalized;
 }
 
+async function saveLiveSessionParticipantPreferences(
+  value: SessionParticipantTranslationPreferences,
+): Promise<AppSnapshot> {
+  if (!snapshot.activeSession) {
+    throw new Error("Start a meeting before updating live translation languages.");
+  }
+
+  const response = await fetchWithTimeout(
+    `${realtimeHttpUrl}/api/live-sessions/${snapshot.activeSession.id}/participant-preferences`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(value),
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to update live session languages: ${response.status} ${body}`.trim());
+  }
+
+  const participantPreferences = await response.json() as SessionParticipantTranslationPreferences;
+  activeSessionParticipantPreferences = participantPreferences;
+  snapshot.participantPreferences = participantPreferences;
+  updateTranslationHealth(
+    "active",
+    `Live session preferences updated: host ${participantPreferences.host.language}, guest ${participantPreferences.guest.language}.`,
+  );
+  return broadcastSnapshot();
+}
+
 async function readDesktopCoachingPreferences(): Promise<{ guidance: string; settings: CoachingSettings }> {
   const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/context`);
   if (!response.ok) {
@@ -2526,6 +2559,10 @@ function registerHandlers(): void {
   ipcMain.handle(
     "translation-settings:save",
     async (_event, settings: StoredTranslationRuntimeSettings) => saveDesktopTranslationRuntimeSettings(settings),
+  );
+  ipcMain.handle(
+    "session:participant-preferences:save",
+    async (_event, preferences: SessionParticipantTranslationPreferences) => saveLiveSessionParticipantPreferences(preferences),
   );
   ipcMain.handle("updater:get-state", async () => updaterState);
   ipcMain.handle("updater:check", async () => checkForDesktopUpdates());

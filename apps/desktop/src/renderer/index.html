@@ -2333,6 +2333,26 @@
         sessionId: null,
         spokenSegmentIds: new Set(),
       };
+      const commonTranslationLanguages = [
+        "Arabic",
+        "Dutch",
+        "English",
+        "French",
+        "German",
+        "Hindi",
+        "Italian",
+        "Japanese",
+        "Korean",
+        "Mandarin Chinese",
+        "Polish",
+        "Portuguese (Brazil)",
+        "Portuguese (Portugal)",
+        "Russian",
+        "Spanish",
+        "Turkish",
+        "Ukrainian",
+        "Vietnamese",
+      ];
       const BACKGROUND_AUTO_START_RMS_THRESHOLD = 0.035;
       const BACKGROUND_AUTO_START_SUSTAIN_MS = 4000;
       const BACKGROUND_AUTO_START_POLL_MS = 1000;
@@ -2628,6 +2648,17 @@
         parts.push(preference.voiceEnabled ? "voice on" : "voice off");
         parts.push(preference.voiceName ? `voice ${preference.voiceName}` : "automatic voice");
         return parts.join(" · ");
+      }
+
+      function buildLanguageOptionMarkup(selectedLanguage) {
+        const normalizedSelectedLanguage = String(selectedLanguage || "").trim();
+        const options = normalizedSelectedLanguage && !commonTranslationLanguages.includes(normalizedSelectedLanguage)
+          ? [normalizedSelectedLanguage, ...commonTranslationLanguages]
+          : commonTranslationLanguages;
+
+        return options
+          .map((language) => `<option value="${escapeHtml(language)}" ${language === normalizedSelectedLanguage ? "selected" : ""}>${escapeHtml(language)}</option>`)
+          .join("");
       }
 
       function markCurrentTranslatedSegmentsAsSpoken(snapshot) {
@@ -5317,7 +5348,16 @@
               <div class="stat-value">${escapeHtml(formatParticipantAudioPreference(participantPreferences.guest))}</div>
             </div>
           </div>
-          <div class="meeting-actions" style="margin-top: 12px; align-items: center;">
+          <div class="meeting-actions" style="margin-top: 12px; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <label class="meta-line" style="display: inline-flex; align-items: center; gap: 8px;">
+              You speak
+              <select id="live-host-language">${buildLanguageOptionMarkup(participantPreferences.host.language)}</select>
+            </label>
+            <label class="meta-line" style="display: inline-flex; align-items: center; gap: 8px;">
+              Guests speak
+              <select id="live-guest-language">${buildLanguageOptionMarkup(participantPreferences.guest.language)}</select>
+            </label>
+            <button id="save-live-language-preferences" class="secondary">Update Languages</button>
             <label class="meta-line" style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer;">
               <input id="translated-speech-toggle" type="checkbox" ${translatedSpeechState.enabled ? "checked" : ""}>
               Speak translated audio on this device
@@ -5325,7 +5365,25 @@
           </div>
         `;
 
+        const liveHostLanguageEl = document.getElementById("live-host-language");
+        const liveGuestLanguageEl = document.getElementById("live-guest-language");
+        const saveLiveLanguagePreferencesButtonEl = document.getElementById("save-live-language-preferences");
         const translatedSpeechToggleEl = document.getElementById("translated-speech-toggle");
+        saveLiveLanguagePreferencesButtonEl?.addEventListener("click", async () => {
+          const updatedSnapshot = await runUiAction("Updating live session languages...", () =>
+            window.listenBridge.saveActiveSessionParticipantPreferences({
+              host: {
+                ...participantPreferences.host,
+                language: liveHostLanguageEl?.value || participantPreferences.host.language,
+              },
+              guest: {
+                ...participantPreferences.guest,
+                language: liveGuestLanguageEl?.value || participantPreferences.guest.language,
+              },
+            })
+          );
+          await render(updatedSnapshot);
+        });
         translatedSpeechToggleEl?.addEventListener("change", () => {
           translatedSpeechState.enabled = translatedSpeechToggleEl.checked;
           writeTranslatedSpeechPreference(translatedSpeechState.enabled);
@@ -5380,6 +5438,7 @@
           const line = {
             text: segment.text,
             translatedText: segment.translatedText || "",
+            translatedLanguage: segment.translatedLanguage || "Translation",
           };
 
           if (previousGroup && previousGroup.speaker === speaker) {
@@ -5400,7 +5459,7 @@
                     ${group.lines
                       .map((line) => `
                         <p>${line.text}</p>
-                        ${line.translatedText ? `<p class="meta-line">Portuguese: ${line.translatedText}</p>` : ""}
+                        ${line.translatedText ? `<p class="meta-line">${escapeHtml(line.translatedLanguage)}: ${escapeHtml(line.translatedText)}</p>` : ""}
                       `)
                       .join("")}
                   </div>

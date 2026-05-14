@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionQuestionAnswer, SessionSummary } from "@listen/shared";
+import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionSummary } from "@listen/shared";
 
 type StateListener = (snapshot: AppSnapshot) => void;
 type RuntimeCapabilities = {
@@ -111,6 +111,8 @@ contextBridge.exposeInMainWorld("listenBridge", {
   getTranslationRuntimeSettings: (): Promise<TranslationRuntimeSettings> => ipcRenderer.invoke("translation-settings:get"),
   saveTranslationRuntimeSettings: (settings: TranslationRuntimeSettings): Promise<TranslationRuntimeSettings> =>
     ipcRenderer.invoke("translation-settings:save", settings),
+  saveActiveSessionParticipantPreferences: (preferences: SessionParticipantTranslationPreferences): Promise<AppSnapshot> =>
+    ipcRenderer.invoke("session:participant-preferences:save", preferences),
   getUpdaterState: (): Promise<UpdaterState> => ipcRenderer.invoke("updater:get-state"),
   checkForUpdates: (): Promise<UpdaterState> => ipcRenderer.invoke("updater:check"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("updater:install"),
@@ -182,6 +184,7 @@ declare global {
       saveRuntimeSecrets(secrets: RuntimeSecrets): Promise<RuntimeSecrets>;
       getTranslationRuntimeSettings(): Promise<TranslationRuntimeSettings>;
       saveTranslationRuntimeSettings(settings: TranslationRuntimeSettings): Promise<TranslationRuntimeSettings>;
+      saveActiveSessionParticipantPreferences(preferences: SessionParticipantTranslationPreferences): Promise<AppSnapshot>;
       getUpdaterState(): Promise<UpdaterState>;
       checkForUpdates(): Promise<UpdaterState>;
       installUpdate(): Promise<void>;
