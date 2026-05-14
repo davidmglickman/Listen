@@ -3107,6 +3107,21 @@
         }
       }
 
+      function promptForListenRegistration() {
+        setCurrentPage("settings");
+        setSetupTab("connections");
+        setStatusBanner("error", "Create or sign into a Listen account before using Listen.");
+      }
+
+      function ensureSignedInListenUser() {
+        if (state.appAuth?.signedIn) {
+          return true;
+        }
+
+        promptForListenRegistration();
+        return false;
+      }
+
       let reviewSearchHydrationInFlight = false;
 
       function buildTranscriptSearchText(transcript = []) {
@@ -3416,6 +3431,16 @@
       }
 
       function syncWorkflowPage(snapshot) {
+        if (!snapshot.appAuth?.signedIn) {
+          if (state.currentPage !== "settings") {
+            state.currentPage = "settings";
+            state.lastAutoPage = "settings";
+            syncPageVisibility();
+          }
+          setSetupTab("connections");
+          return;
+        }
+
         if (snapshot.activeSession) {
           if (state.currentPage !== "call") {
             state.currentPage = "call";
@@ -3633,13 +3658,15 @@
       }
 
       function renderMeetingTemplatePicker() {
+        const canUseListen = state.appAuth?.signedIn === true;
         briefTemplateSelectEl.innerHTML = [
           '<option value="">Choose template</option>',
           ...state.meetingTemplates.map((template) => `<option value="${escapeHtml(template.id)}" ${template.id === state.selectedMeetingTemplateId ? "selected" : ""}>${escapeHtml(template.title)}</option>`),
         ].join("");
 
         applyMeetingTemplateButtonEl.disabled = !state.selectedMeetingId || !state.selectedMeetingTemplateId;
-        launchMeetingFromBriefButtonEl.disabled = !state.selectedMeetingId
+        launchMeetingFromBriefButtonEl.disabled = !canUseListen
+          || !state.selectedMeetingId
           || !state.snapshot?.upcomingMeetings?.some((meeting) => meeting.id === state.selectedMeetingId && meeting.joinUrl);
       }
 
@@ -4578,6 +4605,10 @@
           return;
         }
 
+        if (!ensureSignedInListenUser()) {
+          return;
+        }
+
         if (state.selectedMeetingId === meetingId) {
           await persistMeetingBrief(meetingId);
         }
@@ -4601,7 +4632,13 @@
       function buildInlineMeetingPrepMarkup(meeting) {
         const context = state.meetingContexts[meeting.id] || defaultMeetingContext();
         const attendeeCount = meeting.attendees?.length || 0;
-        const canLaunchMeeting = Boolean(meeting.joinUrl);
+        const canUseListen = state.appAuth?.signedIn === true;
+        const canLaunchMeeting = canUseListen && Boolean(meeting.joinUrl);
+        const launchDisabledTitle = !canUseListen
+          ? 'disabled title="Create or sign into a Listen account before using Listen."'
+          : !meeting.joinUrl
+            ? 'disabled title="This calendar event has no meeting link to launch."'
+            : "";
         return `
           <div class="meeting-inline-prep">
             <div class="card inline-prep-card">
@@ -4629,7 +4666,7 @@
                   <div class="inline-prep-button-row">
                     <button id="inline-open-meeting-details" class="secondary">Details</button>
                     <button id="inline-save-meeting-brief" class="secondary">Save Brief</button>
-                    <button id="inline-launch-meeting" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>Start Meeting</button>
+                    <button id="inline-launch-meeting" ${canLaunchMeeting ? "" : launchDisabledTitle}>Start Meeting</button>
                   </div>
                 </div>
               </div>
@@ -4997,6 +5034,10 @@
 
       async function autoStartSessionFromMicActivity(meetingId = null) {
         if (backgroundMicMonitorState.triggerPending || state.snapshot?.activeSession) {
+          return;
+        }
+
+        if (!ensureSignedInListenUser()) {
           return;
         }
 
@@ -5377,11 +5418,14 @@
       }
 
       function renderConnections(snapshot) {
+        const canUseListen = snapshot.appAuth?.signedIn === true;
+        document.getElementById("refresh-calendars").disabled = !canUseListen;
         connectionsEl.innerHTML = snapshot.calendarConnections
           .filter((connection) => connection.provider !== "mock")
           .map((connection) => {
             const action = connection.connected ? "disconnect" : "connect";
             const label = connection.connected ? "Disconnect" : "Connect";
+            const disabledState = canUseListen ? "" : 'disabled title="Create or sign into a Listen account before using Listen."';
             return `
               <div class="connection-card">
                 <div class="row-between">
@@ -5390,7 +5434,7 @@
                 </div>
                 <p class="body-copy">${connection.accountLabel}</p>
                 <div class="meeting-actions">
-                  <button data-calendar-action="${action}" data-provider="${connection.provider}" class="${connection.connected ? "secondary" : ""}">${label}</button>
+                  <button data-calendar-action="${action}" data-provider="${connection.provider}" class="${connection.connected ? "secondary" : ""}" ${disabledState}>${label}</button>
                 </div>
               </div>
             `;
@@ -5399,6 +5443,10 @@
 
         document.querySelectorAll("[data-calendar-action]").forEach((button) => {
           button.addEventListener("click", async () => {
+            if (!ensureSignedInListenUser()) {
+              return;
+            }
+
             const provider = button.getAttribute("data-provider");
             const action = button.getAttribute("data-calendar-action");
             if (!provider || !action) {
@@ -5507,7 +5555,13 @@
                 : "Research pending";
             const attendeeDetail = attendeeNames || attendeeSummary;
             const showInlinePrep = state.meetingLaunchPrepOpen && state.selectedMeetingId === meeting.id;
-            const canLaunchMeeting = Boolean(meeting.joinUrl);
+            const canUseListen = state.appAuth?.signedIn === true;
+            const canLaunchMeeting = canUseListen && Boolean(meeting.joinUrl);
+            const launchDisabledTitle = !canUseListen
+              ? 'disabled title="Create or sign into a Listen account before using Listen."'
+              : !meeting.joinUrl
+                ? 'disabled title="This calendar event has no meeting link to launch."'
+                : "";
             return `
               <div>
                 <div class="meeting-card ${meeting.id === state.selectedMeetingId && (state.meetingModalOpen || state.meetingLaunchPrepOpen) ? "selected" : ""}" data-meeting-id="${meeting.id}">
@@ -5525,7 +5579,7 @@
                   </div>
                   <div class="meeting-card-actions">
                     <button class="secondary meeting-details-button" data-open-details="${meeting.id}">Details</button>
-                      <button class="meeting-launch-button" data-launch="${meeting.id}" ${canLaunchMeeting ? "" : "disabled title=\"This calendar event has no meeting link to launch.\""}>${showInlinePrep ? "Hide Prep" : "Prep Before Launch"}</button>
+                      <button class="meeting-launch-button" data-launch="${meeting.id}" ${canLaunchMeeting ? "" : launchDisabledTitle}>${showInlinePrep ? "Hide Prep" : "Prep Before Launch"}</button>
                   </div>
                 </div>
                 ${showInlinePrep ? buildInlineMeetingPrepMarkup(meeting) : ""}
@@ -6530,6 +6584,10 @@
       }
 
       document.getElementById("refresh-calendars").addEventListener("click", async () => {
+        if (!ensureSignedInListenUser()) {
+          return;
+        }
+
         const snapshot = await runUiAction("Refreshing calendars...", () => window.listenBridge.refreshCalendars());
         await render(snapshot);
       });

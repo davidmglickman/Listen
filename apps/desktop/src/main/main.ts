@@ -2622,11 +2622,21 @@ async function refreshCalendars(): Promise<AppSnapshot> {
   return broadcastSnapshot();
 }
 
+function requireSignedInListenAccount(): AppAuthState {
+  const authState = appAuthService.getState();
+  if (!authState.signedIn) {
+    throw new Error("Create or sign into a Listen account before using Listen.");
+  }
+
+  return authState;
+}
+
 async function startSession(
   meeting: MeetingRecord,
   meetingContext: MeetingContext | null,
   options: { openMeetingWindow?: boolean } = {},
 ): Promise<AppSnapshot> {
+  requireSignedInListenAccount();
   if (snapshot.activeSession) {
     return broadcastSnapshot();
   }
@@ -2827,7 +2837,10 @@ function registerHandlers(): void {
   ipcMain.handle("session:list", async (_event, limit?: number) => listDesktopSessions(limit));
   ipcMain.handle("session:get", async (_event, sessionId: string) => readDesktopSessionDetail(sessionId));
   ipcMain.handle("session:delete", async (_event, sessionId: string) => deleteDesktopSession(sessionId));
-  ipcMain.handle("calendar:refresh", async () => refreshCalendars());
+  ipcMain.handle("calendar:refresh", async () => {
+    requireSignedInListenAccount();
+    return refreshCalendars();
+  });
   ipcMain.handle("meeting:brief:get", async (_event, meetingId: string) => readDesktopMeetingBrief(meetingId));
   ipcMain.handle("meeting:brief:save", async (_event, meetingId: string, context: MeetingContext) => saveDesktopMeetingBrief(meetingId, context));
   ipcMain.handle("meeting:launch-context:get", async (_event, meetingId: string) => readDesktopMeetingLaunchContext(meetingId));
@@ -2839,10 +2852,12 @@ function registerHandlers(): void {
   ipcMain.handle("meeting:session-history", async (_event, meetingId: string) => readDesktopMeetingSessionHistory(meetingId));
   ipcMain.handle("meeting:drive-history", async (_event, meetingId: string) => readDesktopMeetingDriveHistory(meetingId));
   ipcMain.handle("calendar:connect", async (_event, provider: "google" | "microsoft") => {
+    requireSignedInListenAccount();
     await calendarService.connect(provider);
     return refreshCalendars();
   });
   ipcMain.handle("calendar:disconnect", async (_event, provider: "google" | "microsoft") => {
+    requireSignedInListenAccount();
     await calendarService.disconnect(provider);
     return refreshCalendars();
   });
