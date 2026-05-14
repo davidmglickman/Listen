@@ -251,6 +251,7 @@ let pendingUpdaterStatePatch: Partial<DesktopUpdaterState> | null = null;
 let pendingUpdaterStateTimeout: NodeJS.Timeout | null = null;
 let embeddedRealtimeModuleLoad: Promise<void> | null = null;
 let embeddedRealtimeProcess: ChildProcess | null = null;
+let embeddedRealtimeStopRequested = false;
 let pendingRealtimeRecovery: Promise<void> | null = null;
 
 const minimumUpdaterCheckingDurationMs = 1000;
@@ -444,6 +445,7 @@ async function ensureRealtimeServiceAvailable(databasePath: string): Promise<voi
   process.env.LISTEN_PUBLIC_BASE_URL = process.env.LISTEN_PUBLIC_BASE_URL?.trim() || realtimeHttpUrl;
 
   embeddedRealtimeModuleLoad = Promise.resolve().then(() => {
+    embeddedRealtimeStopRequested = false;
     embeddedRealtimeProcess = spawn(process.execPath, [bundledEntry], {
       cwd: app.getPath("userData"),
       env: {
@@ -466,8 +468,14 @@ async function ensureRealtimeServiceAvailable(databasePath: string): Promise<voi
         console.error(`[realtime] ${text}`);
       }
     });
-    embeddedRealtimeProcess.on("exit", (code) => {
-      console.warn(`Bundled realtime service exited with code ${code ?? -1}.`);
+    embeddedRealtimeProcess.on("exit", (code, signal) => {
+      if (!(embeddedRealtimeStopRequested || isQuitting)) {
+        const exitDescription = signal
+          ? `signal ${signal}`
+          : `code ${code ?? -1}`;
+        console.warn(`Bundled realtime service exited unexpectedly with ${exitDescription}.`);
+      }
+      embeddedRealtimeStopRequested = false;
       embeddedRealtimeProcess = null;
       embeddedRealtimeModuleLoad = null;
     });
@@ -3000,7 +3008,10 @@ app.on("before-quit", (event) => {
     clearInterval(updaterPeriodicCheckInterval);
     updaterPeriodicCheckInterval = null;
   }
-  embeddedRealtimeProcess?.kill();
+  if (embeddedRealtimeProcess) {
+    embeddedRealtimeStopRequested = true;
+    embeddedRealtimeProcess.kill();
+  }
   embeddedRealtimeProcess = null;
   pendingQuitAfterSessionFinalize = false;
 });
