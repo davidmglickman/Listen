@@ -1,6 +1,6 @@
 {
   "name": "@listen/desktop",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "description": "Listen desktop meeting coach for live call prep, capture, and review.",
   "author": "Listen",
   "main": "dist/apps/desktop/src/main/main.js",
