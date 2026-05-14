@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
+  AppAuthState,
   CoachingPrompt,
   MeetingContext,
   MeetingRecord,
@@ -44,12 +45,23 @@ export interface StoredOAuthToken {
   accountLabel?: string;
 }
 
+export interface StoredSupabaseSession {
+  access_token: string;
+  refresh_token: string;
+  expires_at?: number;
+  expires_in?: number;
+  token_type?: string;
+  user: unknown;
+  [key: string]: unknown;
+}
+
 export interface PersistedState {
   lastSummary: SessionSummary | null;
   auth: {
     google: StoredOAuthToken | null;
     microsoft: StoredOAuthToken | null;
   };
+  appAuth: AppAuthState | null;
 }
 
 export interface CompletedSessionRecord {
@@ -67,6 +79,7 @@ export interface CompletedSessionRecord {
 export interface StoredMeetingLaunchContext {
   cacheKey: string;
   context: MeetingContext;
+  participantPreferences?: SessionParticipantTranslationPreferences | null;
 }
 
 export interface StoredRuntimeSecrets {
@@ -156,6 +169,7 @@ export class SessionStore {
     const lastSummary = this.readSetting<SessionSummary>("last_summary");
     const google = this.readSetting<StoredOAuthToken>("auth_google");
     const microsoft = this.readSetting<StoredOAuthToken>("auth_microsoft");
+    const appAuth = this.readSetting<AppAuthState>("app_auth_state");
 
     return {
       lastSummary,
@@ -163,6 +177,7 @@ export class SessionStore {
         google,
         microsoft,
       },
+      appAuth,
     };
   }
 
@@ -172,6 +187,30 @@ export class SessionStore {
 
   async writeAuthToken(provider: "google" | "microsoft", token: StoredOAuthToken | null): Promise<void> {
     this.writeSetting(`auth_${provider}`, token);
+  }
+
+  async readAppAuthState(): Promise<AppAuthState | null> {
+    return this.readSetting<AppAuthState>("app_auth_state");
+  }
+
+  async writeAppAuthState(value: AppAuthState | null): Promise<void> {
+    this.writeSetting("app_auth_state", value);
+  }
+
+  async readSupabaseSession(): Promise<StoredSupabaseSession | null> {
+    return this.readSetting<StoredSupabaseSession>("supabase_auth_session");
+  }
+
+  async writeSupabaseSession(value: StoredSupabaseSession | null): Promise<void> {
+    this.writeSetting("supabase_auth_session", value);
+  }
+
+  async readSupabaseStorage(): Promise<Record<string, string>> {
+    return this.readSetting<Record<string, string>>("supabase_auth_storage") ?? {};
+  }
+
+  async writeSupabaseStorage(value: Record<string, string>): Promise<void> {
+    this.writeSetting("supabase_auth_storage", value);
   }
 
   async readMeetingContext(meetingId: string): Promise<MeetingContext | null> {

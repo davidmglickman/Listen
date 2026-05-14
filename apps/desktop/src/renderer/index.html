@@ -1826,11 +1826,43 @@
                   <textarea id="brief-notes" rows="7" placeholder="Account background, agenda, objections, or recruiting calibration notes"></textarea>
                 </label>
               </div>
+              <div class="card stack" style="margin-top: 16px;">
+                <div>
+                  <h3>Live Translation For This Meeting</h3>
+                  <p class="muted">Set language routing for you and your guests before the call starts.</p>
+                </div>
+                <div class="field-grid">
+                  <label>
+                    You speak
+                    <select id="brief-translation-host-language"></select>
+                  </label>
+                  <label>
+                    Guests speak
+                    <select id="brief-translation-guest-language"></select>
+                  </label>
+                  <label>
+                    <span>Speak translated version of your speech aloud</span>
+                    <input id="brief-translation-host-voice-enabled" type="checkbox" />
+                  </label>
+                  <label>
+                    <span>Speak translated guest speech aloud</span>
+                    <input id="brief-translation-guest-voice-enabled" type="checkbox" />
+                  </label>
+                  <label>
+                    Voice for your translated speech
+                    <select id="brief-translation-host-voice-name"></select>
+                  </label>
+                  <label>
+                    Voice for guest translated speech
+                    <select id="brief-translation-guest-voice-name"></select>
+                  </label>
+                </div>
+              </div>
             </div>
             <div id="prep-panel-research" class="workspace-panel">
               <div>
                 <h3>Research</h3>
-                <p class="muted">Prospect, organization, attendee, and source context for the selected meeting.</p>
+                <p class="muted">Guest, host, attendee, and source context for the selected meeting.</p>
               </div>
               <div id="selected-meeting-research" class="research-scroll"></div>
               <div id="selected-meeting-research-qa" class="card review-qa-card"></div>
@@ -2024,6 +2056,51 @@
                   </div>
                 </div>
                 <div id="setup-panel-connections" class="workspace-panel active">
+                  <div class="card stack">
+                    <div>
+                      <h3>Listen Login</h3>
+                      <p class="muted">Sign into Listen with Google or send yourself an email magic link. This is separate from calendar access.</p>
+                    </div>
+                    <div id="app-auth-summary" class="meta-line">Listen login is not configured.</div>
+                    <div class="field-grid">
+                      <label>
+                        Email magic link
+                        <input id="auth-email-input" type="email" placeholder="you@company.com" autocomplete="email" />
+                      </label>
+                    </div>
+                    <div class="meeting-actions">
+                      <button id="auth-google-sign-in" class="secondary">Sign In with Google</button>
+                      <button id="auth-email-send-link" class="secondary">Send Magic Link</button>
+                      <button id="auth-email-complete" class="secondary">Complete Email Sign-In</button>
+                      <button id="auth-sign-out" class="secondary">Sign Out</button>
+                    </div>
+                  </div>
+                  <div id="admin-users-panel" class="card stack" hidden>
+                    <div>
+                      <h3>User Management</h3>
+                      <p class="muted">Invite teammates, review current org members, and adjust roles or account status.</p>
+                    </div>
+                    <div id="admin-users-summary" class="meta-line">Sign in as an admin to manage users.</div>
+                    <div class="field-grid">
+                      <label>
+                        Invite email
+                        <input id="admin-user-email" type="email" placeholder="teammate@company.com" autocomplete="email" />
+                      </label>
+                      <label>
+                        Invite role
+                        <select id="admin-user-role">
+                          <option value="member">Member</option>
+                          <option value="admin">Admin</option>
+                          <option value="owner">Owner</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="meeting-actions">
+                      <button id="admin-user-invite" class="secondary">Create Invite</button>
+                    </div>
+                    <div id="admin-user-list" class="stack"></div>
+                    <div id="admin-invitation-list" class="stack"></div>
+                  </div>
                   <div>
                     <h3>Calendar Connections</h3>
                     <p class="muted">Connect Google for calendar, Gmail, and Drive access, or connect Microsoft to sync calendars once and return to Meetings.</p>
@@ -2062,7 +2139,7 @@
                       </label>
                       <label>
                         Guest language
-                        <input id="translation-guest-language" type="text" placeholder="Portuguese (Brazil)" autocomplete="off" />
+                        <input id="translation-guest-language" type="text" placeholder="English" autocomplete="off" />
                       </label>
                       <label>
                         <span>Host voice opt-in</span>
@@ -2211,6 +2288,19 @@
     <script>
       const state = {
         snapshot: null,
+        appAuth: {
+          configured: false,
+          signedIn: false,
+          pendingEmail: null,
+          user: null,
+        },
+        adminDirectory: {
+          viewer: null,
+          users: [],
+          invitations: [],
+          status: "idle",
+          note: "",
+        },
         runtimeCapabilities: {
           aiConfigured: false,
           cloudTranscriptionConfigured: false,
@@ -2224,13 +2314,18 @@
         translationRuntimeSettings: {
           enabled: false,
           hostLanguage: "English",
-          guestLanguage: "Portuguese (Brazil)",
+          guestLanguage: "English",
           hostVoiceEnabled: false,
           guestVoiceEnabled: false,
           hostVoiceName: "",
           guestVoiceName: "",
           transcriptionFlushMs: 2500,
           transcriptionFlushBytes: 96000,
+        },
+        liveLanguageDraft: {
+          sessionId: null,
+          hostLanguage: "",
+          guestLanguage: "",
         },
         updater: {
           enabled: false,
@@ -2366,6 +2461,19 @@
     const updaterCurrentBuildEl = document.getElementById("updater-current-build");
     const checkForUpdatesButtonEl = document.getElementById("check-for-updates");
     const connectionsEl = document.getElementById("connections");
+      const appAuthSummaryEl = document.getElementById("app-auth-summary");
+      const authEmailInputEl = document.getElementById("auth-email-input");
+      const authGoogleSignInButtonEl = document.getElementById("auth-google-sign-in");
+      const authEmailSendLinkButtonEl = document.getElementById("auth-email-send-link");
+      const authEmailCompleteButtonEl = document.getElementById("auth-email-complete");
+      const authSignOutButtonEl = document.getElementById("auth-sign-out");
+      const adminUsersPanelEl = document.getElementById("admin-users-panel");
+      const adminUsersSummaryEl = document.getElementById("admin-users-summary");
+      const adminUserEmailEl = document.getElementById("admin-user-email");
+      const adminUserRoleEl = document.getElementById("admin-user-role");
+      const adminUserInviteButtonEl = document.getElementById("admin-user-invite");
+      const adminUserListEl = document.getElementById("admin-user-list");
+      const adminInvitationListEl = document.getElementById("admin-invitation-list");
       const runtimeAiApiKeyEl = document.getElementById("runtime-ai-api-key");
       const runtimeTranscriptionApiKeyEl = document.getElementById("runtime-transcription-api-key");
       const saveRuntimeSecretsButtonEl = document.getElementById("save-runtime-secrets");
@@ -2421,6 +2529,12 @@
       const briefGuestRoleEl = document.getElementById("brief-guest-role");
       const briefDesiredOutcomeEl = document.getElementById("brief-desired-outcome");
       const briefNotesEl = document.getElementById("brief-notes");
+      const briefTranslationHostLanguageEl = document.getElementById("brief-translation-host-language");
+      const briefTranslationGuestLanguageEl = document.getElementById("brief-translation-guest-language");
+      const briefTranslationHostVoiceEnabledEl = document.getElementById("brief-translation-host-voice-enabled");
+      const briefTranslationGuestVoiceEnabledEl = document.getElementById("brief-translation-guest-voice-enabled");
+      const briefTranslationHostVoiceNameEl = document.getElementById("brief-translation-host-voice-name");
+      const briefTranslationGuestVoiceNameEl = document.getElementById("brief-translation-guest-voice-name");
       const briefTemplateSelectEl = document.getElementById("brief-template-select");
       const applyMeetingTemplateButtonEl = document.getElementById("apply-meeting-template");
       const launchMeetingFromBriefButtonEl = document.getElementById("launch-meeting-from-brief");
@@ -2458,6 +2572,12 @@
       function createEmptySnapshot() {
         return {
           calendarConnections: [],
+          appAuth: {
+            configured: false,
+            signedIn: false,
+            pendingEmail: null,
+            user: null,
+          },
           upcomingMeetings: [],
           pendingPopupMeeting: null,
           activeSession: null,
@@ -2639,6 +2759,29 @@
         };
       }
 
+      function syncLiveLanguageDraft(snapshot) {
+        const activeSessionId = snapshot?.activeSession?.id || null;
+        if (!activeSessionId) {
+          state.liveLanguageDraft = {
+            sessionId: null,
+            hostLanguage: "",
+            guestLanguage: "",
+          };
+          return;
+        }
+
+        if (state.liveLanguageDraft.sessionId === activeSessionId) {
+          return;
+        }
+
+        const participantPreferences = getDisplayedTranslationPreferences();
+        state.liveLanguageDraft = {
+          sessionId: activeSessionId,
+          hostLanguage: participantPreferences.host.language,
+          guestLanguage: participantPreferences.guest.language,
+        };
+      }
+
       function formatParticipantAudioPreference(preference) {
         if (!preference) {
           return "Not configured";
@@ -2659,6 +2802,62 @@
         return options
           .map((language) => `<option value="${escapeHtml(language)}" ${language === normalizedSelectedLanguage ? "selected" : ""}>${escapeHtml(language)}</option>`)
           .join("");
+      }
+
+      function getDefaultMeetingTranslationPreferences() {
+        return {
+          host: {
+            language: state.translationRuntimeSettings.hostLanguage,
+            voiceEnabled: state.translationRuntimeSettings.hostVoiceEnabled,
+            voiceName: state.translationRuntimeSettings.hostVoiceName || null,
+          },
+          guest: {
+            language: state.translationRuntimeSettings.guestLanguage,
+            voiceEnabled: state.translationRuntimeSettings.guestVoiceEnabled,
+            voiceName: state.translationRuntimeSettings.guestVoiceName || null,
+          },
+        };
+      }
+
+      function normalizeMeetingTranslationPreferences(preferences) {
+        const fallback = getDefaultMeetingTranslationPreferences();
+        return {
+          host: {
+            language: String(preferences?.host?.language || fallback.host.language).trim() || fallback.host.language,
+            voiceEnabled: preferences?.host?.voiceEnabled ?? fallback.host.voiceEnabled,
+            voiceName: String(preferences?.host?.voiceName || fallback.host.voiceName || "").trim() || null,
+          },
+          guest: {
+            language: String(preferences?.guest?.language || fallback.guest.language).trim() || fallback.guest.language,
+            voiceEnabled: preferences?.guest?.voiceEnabled ?? fallback.guest.voiceEnabled,
+            voiceName: String(preferences?.guest?.voiceName || fallback.guest.voiceName || "").trim() || null,
+          },
+        };
+      }
+
+      function applyMeetingTranslationPreferences(preferences) {
+        const normalizedPreferences = normalizeMeetingTranslationPreferences(preferences);
+        briefTranslationHostLanguageEl.innerHTML = buildLanguageOptionMarkup(normalizedPreferences.host.language);
+        briefTranslationGuestLanguageEl.innerHTML = buildLanguageOptionMarkup(normalizedPreferences.guest.language);
+        briefTranslationHostVoiceEnabledEl.checked = normalizedPreferences.host.voiceEnabled;
+        briefTranslationGuestVoiceEnabledEl.checked = normalizedPreferences.guest.voiceEnabled;
+        renderVoiceOptions(briefTranslationHostVoiceNameEl, normalizedPreferences.host.voiceName || "");
+        renderVoiceOptions(briefTranslationGuestVoiceNameEl, normalizedPreferences.guest.voiceName || "");
+      }
+
+      function buildMeetingTranslationPreferences() {
+        return normalizeMeetingTranslationPreferences({
+          host: {
+            language: briefTranslationHostLanguageEl.value,
+            voiceEnabled: briefTranslationHostVoiceEnabledEl.checked,
+            voiceName: briefTranslationHostVoiceNameEl.value || null,
+          },
+          guest: {
+            language: briefTranslationGuestLanguageEl.value,
+            voiceEnabled: briefTranslationGuestVoiceEnabledEl.checked,
+            voiceName: briefTranslationGuestVoiceNameEl.value || null,
+          },
+        });
       }
 
       function markCurrentTranslatedSegmentsAsSpoken(snapshot) {
@@ -3317,6 +3516,8 @@
         function syncVoiceSelectors() {
           renderVoiceOptions(translationHostVoiceNameEl, state.translationRuntimeSettings.hostVoiceName);
           renderVoiceOptions(translationGuestVoiceNameEl, state.translationRuntimeSettings.guestVoiceName);
+            renderVoiceOptions(briefTranslationHostVoiceNameEl, briefTranslationHostVoiceNameEl.value);
+            renderVoiceOptions(briefTranslationGuestVoiceNameEl, briefTranslationGuestVoiceNameEl.value);
         }
 
       function renderMeetingTemplates() {
@@ -3518,7 +3719,7 @@
         state.translationRuntimeSettings = {
           enabled: settings.enabled === true,
           hostLanguage: settings.hostLanguage || settings.sourceLanguage || "English",
-          guestLanguage: settings.guestLanguage || settings.targetLanguage || "Portuguese (Brazil)",
+          guestLanguage: settings.guestLanguage || settings.targetLanguage || "English",
           hostVoiceEnabled: settings.hostVoiceEnabled === true,
           guestVoiceEnabled: settings.guestVoiceEnabled === true,
           transcriptionFlushMs: Number(settings.transcriptionFlushMs) || 2500,
@@ -3532,6 +3733,9 @@
         translationGuestVoiceEnabledEl.checked = state.translationRuntimeSettings.guestVoiceEnabled;
         translationFlushMsEl.value = String(state.translationRuntimeSettings.transcriptionFlushMs);
         translationFlushBytesEl.value = String(state.translationRuntimeSettings.transcriptionFlushBytes);
+        if (!state.selectedMeetingId) {
+          applyMeetingTranslationPreferences(getDefaultMeetingTranslationPreferences());
+        }
       }
 
       function isRedundantMeetingHeadline(meetingTitle, headline) {
@@ -3553,6 +3757,7 @@
 
       function renderSetupStatus(snapshot) {
         const connectedCalendars = snapshot.calendarConnections.filter((connection) => connection.provider !== "mock" && connection.connected).length;
+        const appAuthReady = snapshot.appAuth?.signedIn === true;
         const hasOrgDocs = state.orgDocuments.length > 0;
         const orgDocsUnavailable = state.orgDocumentsStatus === "unavailable";
         const hasTemplates = state.meetingTemplates.length > 0;
@@ -3565,6 +3770,17 @@
             ? "AI key is missing. Save it in Setup so summaries and coaching work in packaged builds."
             : "Transcription key is missing. Without it, Listen only transcribes your local microphone. Save your transcription key in Setup.";
         setupOverviewEl.innerHTML = [
+          {
+            title: "Sign into Listen",
+            detail: !snapshot.appAuth?.configured
+              ? "Supabase Auth is not configured for this build."
+              : snapshot.appAuth?.signedIn
+                ? `Signed in as ${snapshot.appAuth.user?.email || snapshot.appAuth.user?.fullName || "current user"}.`
+                : snapshot.appAuth?.pendingEmail
+                  ? `Magic link sent to ${snapshot.appAuth.pendingEmail}. Finish it in your browser, then click Complete Email Sign-In.`
+                  : "Sign in with Google or send an email magic link so this device has an authenticated Listen user.",
+            complete: appAuthReady,
+          },
           {
             title: "Connect calendar",
             detail: connectedCalendars ? `Connected accounts: ${connectedCalendars}` : "Connect Google or Microsoft so meetings sync automatically.",
@@ -3617,6 +3833,27 @@
           `)
           .join("");
         renderUpdaterStatus();
+      }
+
+      function renderAppAuth(snapshot) {
+        state.appAuth = snapshot.appAuth || state.appAuth;
+        const authState = state.appAuth;
+        appAuthSummaryEl.textContent = !authState.configured
+          ? "Supabase Auth is not configured in the desktop environment."
+          : authState.signedIn
+            ? `Signed in as ${authState.user?.email || authState.user?.fullName || authState.user?.id}.`
+            : authState.pendingEmail
+              ? `Magic link sent to ${authState.pendingEmail}. Open the link, then return here and click Complete Email Sign-In.`
+              : "Not signed in.";
+
+        if (!authEmailInputEl.value && authState.pendingEmail) {
+          authEmailInputEl.value = authState.pendingEmail;
+        }
+
+        authGoogleSignInButtonEl.disabled = !authState.configured || authState.signedIn;
+        authEmailSendLinkButtonEl.disabled = !authState.configured || authState.signedIn;
+        authEmailCompleteButtonEl.disabled = !authState.configured || !authState.pendingEmail || authState.signedIn;
+        authSignOutButtonEl.disabled = !authState.configured || !authState.signedIn;
       }
 
       function getUpdaterActionLabel() {
@@ -3794,15 +4031,11 @@
           .slice(0, 4);
 
         if (personSummary) {
-          lines.push(`Prospect summary: ${personSummary}`);
+          lines.push(`Guest summary: ${personSummary}`);
         }
 
         if (orgSummary) {
-          lines.push(`Organization summary: ${orgSummary}`);
-        }
-
-        if (signals.length) {
-          lines.push(`Recent signals:\n${signals.map((signal) => `- ${signal}`).join("\n")}`);
+          lines.push(`Host summary: ${orgSummary}`);
         }
 
         return lines.length ? lines.join("\n") : "";
@@ -3961,9 +4194,9 @@
         return null;
       }
 
-      function buildMeetingLaunchContextCacheKey(meeting, baseContext) {
+      function buildMeetingLaunchContextCacheKey(meeting, baseContext, participantPreferences) {
         return JSON.stringify({
-          version: 2,
+          version: 3,
           meeting: meeting
             ? {
                 id: meeting.id,
@@ -3983,6 +4216,7 @@
             desiredOutcome: baseContext?.desiredOutcome || "",
             notes: baseContext?.notes || "",
           },
+          participantPreferences: normalizeMeetingTranslationPreferences(participantPreferences),
         });
       }
 
@@ -3992,12 +4226,13 @@
           ...(baseContext || defaultMeetingContext()),
           notes: (baseContext?.notes || "").trim(),
         };
+        const participantPreferences = buildMeetingTranslationPreferences();
 
-        const cacheKey = buildMeetingLaunchContextCacheKey(meeting, context);
+        const cacheKey = buildMeetingLaunchContextCacheKey(meeting, context, participantPreferences);
         const cachedLaunchContext = state.meetingLaunchContexts[meetingId]
           || await window.listenBridge.getMeetingLaunchContext(meetingId);
 
-        if (cachedLaunchContext?.cacheKey === cacheKey && cachedLaunchContext?.context) {
+        if (cachedLaunchContext?.cacheKey === cacheKey && cachedLaunchContext?.context && cachedLaunchContext?.participantPreferences) {
           state.meetingLaunchContexts[meetingId] = cachedLaunchContext;
           return cachedLaunchContext.context;
         }
@@ -4008,6 +4243,7 @@
         const launchContextPayload = {
           cacheKey,
           context: launchContext,
+          participantPreferences,
         };
 
         state.meetingLaunchContexts[meetingId] = launchContextPayload;
@@ -4118,8 +4354,8 @@
 
         const context = buildMeetingContext();
         state.meetingContexts[meetingId] = context;
-        delete state.meetingLaunchContexts[meetingId];
         await window.listenBridge.saveMeetingBrief(meetingId, context);
+        await buildLaunchMeetingContext(meetingId, context);
         return context;
       }
 
@@ -4244,6 +4480,7 @@
           selectedMeetingResearchEl.innerHTML = '<div class="section-empty">Select a meeting to review its research and call brief.</div>';
           selectedMeetingHistoryEl.innerHTML = '<div class="section-empty">Select a meeting to review related email and prior meetings.</div>';
           applyMeetingContext(defaultMeetingContext());
+          applyMeetingTranslationPreferences(getDefaultMeetingTranslationPreferences());
           renderMeetingTemplatePicker();
           renderSessionQa(state.snapshot);
           syncMeetingModal();
@@ -4264,7 +4501,13 @@
           state.meetingContexts[meetingId] = (await window.listenBridge.getMeetingBrief(meetingId)) || defaultMeetingContext();
         }
 
+        const launchContext = state.meetingLaunchContexts[meetingId] || await window.listenBridge.getMeetingLaunchContext(meetingId);
+        if (launchContext) {
+          state.meetingLaunchContexts[meetingId] = launchContext;
+        }
+
         applyMeetingContext(state.meetingContexts[meetingId]);
+        applyMeetingTranslationPreferences(launchContext?.participantPreferences || getDefaultMeetingTranslationPreferences());
         renderMeetingTemplatePicker();
         renderMeetings(state.snapshot);
         renderSelectedMeetingResearch(state.snapshot);
@@ -5118,7 +5361,7 @@
           const sessionHistory = state.meetingSessionHistory[meeting.id];
           const driveHistory = state.meetingDriveHistory[meeting.id];
           const personSummary = isUsefulResearchText(meeting.research?.personSummary) ? meeting.research.personSummary.trim() : "";
-          const recentSignals = (meeting.research?.recentSignals || []).filter((signal) => isUsefulResearchText(signal)).slice(0, 5);
+          const hostSummary = isUsefulResearchText(meeting.research?.organizationSummary) ? meeting.research.organizationSummary.trim() : "";
           const attendeeMarkup = meeting.attendees?.length
             ? `<div class="attendee-list">${meeting.attendees.slice(0, 6).map((attendee) => `
                 <div class="attendee-item">
@@ -5145,13 +5388,13 @@
             </div>
             <div class="research-grid">
               <div class="research-section">
-              <h3>Prospect</h3>
-              <p>${personSummary || "No useful prospect summary is available yet."}</p>
+              <h3>Guest</h3>
+              <p>${personSummary || "No useful guest summary is available yet."}</p>
               </div>
-            </div>
-            <div class="research-section full-width">
-              <h3>Recent Signals</h3>
-              ${recentSignals.length ? `<div class="evidence-list">${recentSignals.map((signal) => `<div class="transcript-item">${escapeHtml(signal)}</div>`).join("")}</div>` : '<div class="section-empty">Research is not ready yet beyond the basic meeting metadata.</div>'}
+              <div class="research-section">
+              <h3>Host</h3>
+              <p>${hostSummary || "No useful host summary is available yet."}</p>
+              </div>
             </div>
             <div class="research-grid">
               <div class="research-section">
@@ -5271,9 +5514,8 @@
             ${meeting.research ? `
               <div class="research-note">
                 <div class="badge success">research ${meeting.research.status}</div>
-                <p><strong>Prospect:</strong> ${meeting.research.personSummary ?? "Pending research snapshot."}</p>
-                <p><strong>Org:</strong> ${meeting.research.organizationSummary ?? "Organization summary pending."}</p>
-                <p><strong>Signals:</strong> ${(meeting.research.recentSignals || []).slice(0, 2).join(" ") || "No recent signals yet."}</p>
+                <p><strong>Guest:</strong> ${meeting.research.personSummary ?? "Pending guest summary."}</p>
+                <p><strong>Host:</strong> ${meeting.research.organizationSummary ?? "Pending host summary."}</p>
               </div>
             ` : '<p class="muted">No pre-meeting research available yet.</p>'}
             <div class="meeting-actions">
@@ -5321,6 +5563,13 @@
         }
 
         const participantPreferences = getDisplayedTranslationPreferences();
+        const liveLanguageDraft = state.liveLanguageDraft.sessionId === snapshot.activeSession.id
+          ? state.liveLanguageDraft
+          : {
+              sessionId: snapshot.activeSession.id,
+              hostLanguage: participantPreferences.host.language,
+              guestLanguage: participantPreferences.guest.language,
+            };
         activeSessionEl.innerHTML = `
           <div class="stats-grid">
             <div class="stat-tile">
@@ -5351,16 +5600,16 @@
           <div class="meeting-actions" style="margin-top: 12px; align-items: center; gap: 12px; flex-wrap: wrap;">
             <label class="meta-line" style="display: inline-flex; align-items: center; gap: 8px;">
               You speak
-              <select id="live-host-language">${buildLanguageOptionMarkup(participantPreferences.host.language)}</select>
+              <select id="live-host-language">${buildLanguageOptionMarkup(liveLanguageDraft.hostLanguage)}</select>
             </label>
             <label class="meta-line" style="display: inline-flex; align-items: center; gap: 8px;">
               Guests speak
-              <select id="live-guest-language">${buildLanguageOptionMarkup(participantPreferences.guest.language)}</select>
+              <select id="live-guest-language">${buildLanguageOptionMarkup(liveLanguageDraft.guestLanguage)}</select>
             </label>
             <button id="save-live-language-preferences" class="secondary">Update Languages</button>
             <label class="meta-line" style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer;">
               <input id="translated-speech-toggle" type="checkbox" ${translatedSpeechState.enabled ? "checked" : ""}>
-              Speak translated audio on this device
+              Play translated speech through my speakers
             </label>
           </div>
         `;
@@ -5369,16 +5618,30 @@
         const liveGuestLanguageEl = document.getElementById("live-guest-language");
         const saveLiveLanguagePreferencesButtonEl = document.getElementById("save-live-language-preferences");
         const translatedSpeechToggleEl = document.getElementById("translated-speech-toggle");
+        liveHostLanguageEl?.addEventListener("change", () => {
+          state.liveLanguageDraft = {
+            ...state.liveLanguageDraft,
+            sessionId: snapshot.activeSession.id,
+            hostLanguage: liveHostLanguageEl.value,
+          };
+        });
+        liveGuestLanguageEl?.addEventListener("change", () => {
+          state.liveLanguageDraft = {
+            ...state.liveLanguageDraft,
+            sessionId: snapshot.activeSession.id,
+            guestLanguage: liveGuestLanguageEl.value,
+          };
+        });
         saveLiveLanguagePreferencesButtonEl?.addEventListener("click", async () => {
           const updatedSnapshot = await runUiAction("Updating live session languages...", () =>
             window.listenBridge.saveActiveSessionParticipantPreferences({
               host: {
                 ...participantPreferences.host,
-                language: liveHostLanguageEl?.value || participantPreferences.host.language,
+                language: state.liveLanguageDraft.hostLanguage || participantPreferences.host.language,
               },
               guest: {
                 ...participantPreferences.guest,
-                language: liveGuestLanguageEl?.value || participantPreferences.guest.language,
+                language: state.liveLanguageDraft.guestLanguage || participantPreferences.guest.language,
               },
             })
           );
@@ -5910,9 +6173,12 @@
 
       async function render(snapshot) {
         state.snapshot = snapshot;
+        state.appAuth = snapshot.appAuth || state.appAuth;
+        syncLiveLanguageDraft(snapshot);
         syncWorkflowPage(snapshot);
         await ensureSelectedMeeting(snapshot);
         ensureReviewData(snapshot);
+        renderAppAuth(snapshot);
         renderConnections(snapshot);
         renderMeetings(snapshot);
         renderSelectedMeetingResearch(snapshot);
@@ -5964,6 +6230,48 @@
         applyRuntimeSecrets(secrets);
         state.runtimeCapabilities = await window.listenBridge.getRuntimeCapabilities();
         renderSetupStatus(state.snapshot);
+      });
+      authGoogleSignInButtonEl.addEventListener("click", async () => {
+        const authState = await runUiAction("Opening Google sign-in for Listen login...", () => window.listenBridge.signInWithGoogle());
+        state.appAuth = authState;
+        if (state.snapshot) {
+          state.snapshot.appAuth = authState;
+        }
+        renderAppAuth(state.snapshot || createEmptySnapshot());
+        renderSetupStatus(state.snapshot || createEmptySnapshot());
+      });
+      authEmailSendLinkButtonEl.addEventListener("click", async () => {
+        const email = authEmailInputEl.value.trim();
+        if (!email) {
+          setStatusBanner("error", "Enter an email address first.");
+          return;
+        }
+
+        const authState = await runUiAction("Sending Listen magic link...", () => window.listenBridge.sendMagicLink(email));
+        state.appAuth = authState;
+        if (state.snapshot) {
+          state.snapshot.appAuth = authState;
+        }
+        renderAppAuth(state.snapshot || createEmptySnapshot());
+        renderSetupStatus(state.snapshot || createEmptySnapshot());
+      });
+      authEmailCompleteButtonEl.addEventListener("click", async () => {
+        const authState = await runUiAction("Waiting for email sign-in callback...", () => window.listenBridge.completeEmailSignIn());
+        state.appAuth = authState;
+        if (state.snapshot) {
+          state.snapshot.appAuth = authState;
+        }
+        renderAppAuth(state.snapshot || createEmptySnapshot());
+        renderSetupStatus(state.snapshot || createEmptySnapshot());
+      });
+      authSignOutButtonEl.addEventListener("click", async () => {
+        const authState = await runUiAction("Signing out of Listen...", () => window.listenBridge.signOut());
+        state.appAuth = authState;
+        if (state.snapshot) {
+          state.snapshot.appAuth = authState;
+        }
+        renderAppAuth(state.snapshot || createEmptySnapshot());
+        renderSetupStatus(state.snapshot || createEmptySnapshot());
       });
       saveTranslationSettingsButtonEl.addEventListener("click", async () => {
         const settings = await runUiAction("Saving translation settings...", () =>
@@ -6163,6 +6471,7 @@
       syncPrepPanels();
       syncSetupPanels();
       Promise.allSettled([
+        window.listenBridge.getAuthState(),
         window.listenBridge.getRuntimeCapabilities(),
         window.listenBridge.getRuntimeSecrets(),
         window.listenBridge.getTranslationRuntimeSettings(),
@@ -6173,7 +6482,11 @@
         window.listenBridge.listMeetingTemplates(),
       ])
         .then((results) => {
-          const [runtimeCapabilitiesResult, runtimeSecretsResult, translationSettingsResult, updaterStateResult, snapshotResult, coachingPreferencesResult, orgDocumentsResult, meetingTemplatesResult] = results;
+          const [authStateResult, runtimeCapabilitiesResult, runtimeSecretsResult, translationSettingsResult, updaterStateResult, snapshotResult, coachingPreferencesResult, orgDocumentsResult, meetingTemplatesResult] = results;
+
+          if (authStateResult.status === "fulfilled") {
+            state.appAuth = authStateResult.value;
+          }
 
           if (runtimeCapabilitiesResult.status === "fulfilled") {
             state.runtimeCapabilities = runtimeCapabilitiesResult.value;
@@ -6208,6 +6521,7 @@
           const failedLabels = [];
           const failureMessages = [];
           const snapshot = snapshotResult.status === "fulfilled" ? snapshotResult.value : createEmptySnapshot();
+          snapshot.appAuth = state.appAuth;
 
           if (snapshotResult.status === "rejected") {
             failedLabels.push("live session service");

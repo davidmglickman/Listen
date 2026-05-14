@@ -1,6 +1,6 @@
 {
   "name": "@listen/desktop",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Listen desktop meeting coach for live call prep, capture, and review.",
   "author": "Listen",
   "main": "dist/apps/desktop/src/main/main.js",
@@ -16,13 +16,14 @@
   },
   "dependencies": {
     "@listen/shared": "0.1.0",
+    "@supabase/supabase-js": "^2.105.4",
     "dotenv": "^16.5.0",
     "electron-updater": "^6.6.2",
     "ws": "^8.18.1"
   },
   "devDependencies": {
-    "esbuild": "^0.25.4",
     "electron": "35.2.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.4"
   }
 }

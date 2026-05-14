@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionSummary } from "@listen/shared";
+import type { AdminManagedUser, AdminUserDirectory, AppAuthState, AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionSummary } from "@listen/shared";
 
 type StateListener = (snapshot: AppSnapshot) => void;
 type RuntimeCapabilities = {
@@ -78,6 +78,7 @@ type MeetingDriveHistory = {
 type StoredMeetingLaunchContext = {
   cacheKey: string;
   context: MeetingContext;
+  participantPreferences?: SessionParticipantTranslationPreferences | null;
 };
 type OrgDocumentInput = {
   title: string;
@@ -105,6 +106,15 @@ type UpdaterListener = (state: UpdaterState) => void;
 
 contextBridge.exposeInMainWorld("listenBridge", {
   getSnapshot: (): Promise<AppSnapshot> => ipcRenderer.invoke("app:get-snapshot"),
+  getAuthState: (): Promise<AppAuthState> => ipcRenderer.invoke("auth:get-state"),
+  signInWithGoogle: (): Promise<AppAuthState> => ipcRenderer.invoke("auth:sign-in-google"),
+  sendMagicLink: (email: string): Promise<AppAuthState> => ipcRenderer.invoke("auth:send-magic-link", email),
+  completeEmailSignIn: (): Promise<AppAuthState> => ipcRenderer.invoke("auth:complete-email-sign-in"),
+  signOut: (): Promise<AppAuthState> => ipcRenderer.invoke("auth:sign-out"),
+  listAdminUsers: (): Promise<AdminUserDirectory> => ipcRenderer.invoke("admin-users:list"),
+  inviteAdminUser: (email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory> => ipcRenderer.invoke("admin-users:invite", email, role),
+  updateAdminUser: (profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory> =>
+    ipcRenderer.invoke("admin-users:update", profileId, updates),
   getRuntimeCapabilities: (): Promise<RuntimeCapabilities> => ipcRenderer.invoke("app:get-runtime-capabilities"),
   getRuntimeSecrets: (): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:get"),
   saveRuntimeSecrets: (secrets: RuntimeSecrets): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:save", secrets),
@@ -179,6 +189,14 @@ declare global {
   interface Window {
     listenBridge: {
       getSnapshot(): Promise<AppSnapshot>;
+      getAuthState(): Promise<AppAuthState>;
+      signInWithGoogle(): Promise<AppAuthState>;
+      sendMagicLink(email: string): Promise<AppAuthState>;
+      completeEmailSignIn(): Promise<AppAuthState>;
+      signOut(): Promise<AppAuthState>;
+      listAdminUsers(): Promise<AdminUserDirectory>;
+      inviteAdminUser(email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory>;
+      updateAdminUser(profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory>;
       getRuntimeCapabilities(): Promise<RuntimeCapabilities>;
       getRuntimeSecrets(): Promise<RuntimeSecrets>;
       saveRuntimeSecrets(secrets: RuntimeSecrets): Promise<RuntimeSecrets>;

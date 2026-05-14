@@ -27,6 +27,11 @@ interface DerivedResearchHints {
   domainSource: "attendee" | "email" | "organization" | "none";
 }
 
+interface ResearchMergePolicy {
+  allowInferredCompanyContext: boolean;
+  bannedDomains: Set<string>;
+}
+
 const PERSONAL_EMAIL_DOMAINS = new Set([
   "gmail.com",
   "googlemail.com",
@@ -90,6 +95,12 @@ function extractDomainFromEmail(email: string | null | undefined): string | null
   }
 
   return domain;
+}
+
+function readEmailDomain(email: string | null | undefined): string | null {
+  const trimmed = email?.trim().toLowerCase() || "";
+  const match = trimmed.match(/^[^@\s]+@([^@\s]+)$/);
+  return match ? normalizeDomain(match[1]) : null;
 }
 
 function titleCaseWord(value: string): string {
@@ -161,6 +172,66 @@ function deriveResearchHints(job: ResearchJobWorkItem): DerivedResearchHints {
     ]),
     domainSource: attendeeDomain ? "attendee" : emailDomain ? "email" : organizationDomain ? "organization" : "none",
   };
+}
+
+function buildResearchMergePolicy(job: ResearchJobWorkItem, fallback: ResearchSnapshot): ResearchMergePolicy {
+  const fallbackPayload = (fallback.rawPayload ?? {}) as {
+    companyDomain?: unknown;
+    companyName?: unknown;
+  };
+  const emailDomain = readEmailDomain(job.personEmail);
+  const bannedDomains = new Set<string>();
+
+  if (emailDomain && PERSONAL_EMAIL_DOMAINS.has(emailDomain)) {
+    bannedDomains.add(emailDomain);
+  }
+
+  const hasDeterministicCompanyContext = typeof fallbackPayload.companyDomain === "string" && fallbackPayload.companyDomain.trim()
+    || typeof fallbackPayload.companyName === "string" && fallbackPayload.companyName.trim();
+
+  return {
+    allowInferredCompanyContext: Boolean(hasDeterministicCompanyContext),
+    bannedDomains,
+  };
+}
+
+function containsBannedDomain(value: string | undefined, policy: ResearchMergePolicy): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.toLowerCase();
+  for (const domain of policy.bannedDomains) {
+    if (normalized.includes(domain)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function sanitizeSummary(value: string | undefined, fallbackValue: string | undefined, policy: ResearchMergePolicy): string | undefined {
+  if (!value) {
+    return fallbackValue;
+  }
+
+  if (!policy.allowInferredCompanyContext && containsBannedDomain(value, policy)) {
+    return fallbackValue;
+  }
+
+  return value;
+}
+
+function sanitizeReferences(values: string[] | undefined, fallbackValues: string[], policy: ResearchMergePolicy): string[] {
+  const candidateValues = values?.length ? values : fallbackValues;
+  const sanitized = candidateValues.filter((value) => !containsBannedDomain(value, policy));
+  return sanitized.length ? sanitized : fallbackValues.filter((value) => !containsBannedDomain(value, policy));
+}
+
+function sanitizeRecentSignals(values: string[] | undefined, fallbackValues: string[], policy: ResearchMergePolicy): string[] {
+  const candidateValues = values?.length ? values : fallbackValues;
+  const sanitized = candidateValues.filter((value) => !containsBannedDomain(value, policy));
+  return sanitized.length ? sanitized : fallbackValues;
 }
 
 export class ManualResearchProvider implements ResearchProvider {
@@ -280,6 +351,7 @@ export class OpenAiResearchProvider implements ResearchProvider {
 
   async enrich(job: ResearchJobWorkItem): Promise<ResearchSnapshot> {
     const fallback = await new ManualResearchProvider().enrich(job);
+    const mergePolicy = buildResearchMergePolicy(job, fallback);
     const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
@@ -371,11 +443,11 @@ export class OpenAiResearchProvider implements ResearchProvider {
     const parsed = parseAiResearchResponse(content);
 
     return {
-      personSummary: parsed.personSummary || fallback.personSummary,
-      organizationSummary: parsed.organizationSummary || fallback.organizationSummary,
-      recentSignals: parsed.recentSignals?.length ? parsed.recentSignals : fallback.recentSignals,
+      personSummary: sanitizeSummary(parsed.personSummary, fallback.personSummary, mergePolicy),
+      organizationSummary: sanitizeSummary(parsed.organizationSummary, fallback.organizationSummary, mergePolicy),
+      recentSignals: sanitizeRecentSignals(parsed.recentSignals, fallback.recentSignals, mergePolicy),
       linkedInUrl: parsed.linkedInUrl || fallback.linkedInUrl,
-      references: parsed.references?.length ? parsed.references : fallback.references,
+      references: sanitizeReferences(parsed.references, fallback.references, mergePolicy),
       rawPayload: {
         provider: "openai",
         model: this.model,

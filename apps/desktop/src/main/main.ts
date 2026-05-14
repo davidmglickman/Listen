@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
-import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, Notification, session, shell, Tray, utilityProcess } from "electron";
+import type { AdminManagedUser, AdminUserDirectory, AppAuthState, AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, Notification, session, shell, Tray } from "electron";
 import type { MessageBoxOptions } from "electron";
 import dotenv from "dotenv";
 import { autoUpdater } from "electron-updater";
@@ -17,6 +18,7 @@ import { MeetingScheduler } from "./scheduler/meetingScheduler";
 import { AutoStopController } from "./session/autoStopController";
 import { SessionStore, type DesktopCloseBehavior, type StoredMeetingLaunchContext, type StoredRuntimeSecrets, type StoredTranslationRuntimeSettings } from "./storage/sessionStore";
 import { fetchWithTimeout } from "./http/fetchWithTimeout";
+import { DesktopSupabaseAuthService } from "./auth/supabaseAuth";
 
 type ContextQuestionDocument = {
   title: string;
@@ -70,13 +72,25 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function getDefaultRealtimePort(): string {
+  return app.isPackaged ? "8787" : "8788";
+}
+
+function getConfiguredRealtimePort(): string {
+  if (!app.isPackaged) {
+    return getDefaultRealtimePort();
+  }
+
+  return process.env.LISTEN_REALTIME_PORT?.trim() || getDefaultRealtimePort();
+}
+
 function resolveRealtimeHttpUrl(): string {
   const explicitUrl = process.env.LISTEN_API_BASE_URL?.trim();
   if (explicitUrl) {
     return trimTrailingSlash(explicitUrl);
   }
 
-  return `http://localhost:${process.env.LISTEN_REALTIME_PORT ?? 8787}`;
+  return `http://localhost:${getConfiguredRealtimePort()}`;
 }
 
 function resolveRealtimeWsUrl(httpUrl: string): string {
@@ -93,7 +107,7 @@ function resolveRealtimeWsUrl(httpUrl: string): string {
     url.hash = "";
     return trimTrailingSlash(url.toString());
   } catch {
-    return `ws://localhost:${process.env.LISTEN_REALTIME_PORT ?? 8787}/ws`;
+    return `ws://localhost:${getConfiguredRealtimePort()}/ws`;
   }
 }
 
@@ -124,7 +138,7 @@ function getEnvTranslationRuntimeSettings(): StoredTranslationRuntimeSettings {
   return {
     enabled: process.env.LISTEN_TRANSLATION_ENABLED === "true",
     hostLanguage: process.env.LISTEN_TRANSLATION_SOURCE_LANGUAGE?.trim() || "English",
-    guestLanguage: process.env.LISTEN_TRANSLATION_TARGET_LANGUAGE?.trim() || "Portuguese (Brazil)",
+    guestLanguage: process.env.LISTEN_TRANSLATION_TARGET_LANGUAGE?.trim() || "English",
     hostVoiceEnabled: false,
     guestVoiceEnabled: false,
     hostVoiceName: "",
@@ -181,6 +195,24 @@ function getSessionParticipantTranslationPreferences(): SessionParticipantTransl
   };
 }
 
+function normalizeSessionParticipantTranslationPreferences(
+  value: SessionParticipantTranslationPreferences | null | undefined,
+  fallback: SessionParticipantTranslationPreferences = getSessionParticipantTranslationPreferences(),
+): SessionParticipantTranslationPreferences {
+  return {
+    host: {
+      language: value?.host?.language?.trim() || fallback.host.language,
+      voiceEnabled: value?.host?.voiceEnabled ?? fallback.host.voiceEnabled,
+      voiceName: value?.host?.voiceName?.trim() || fallback.host.voiceName || null,
+    },
+    guest: {
+      language: value?.guest?.language?.trim() || fallback.guest.language,
+      voiceEnabled: value?.guest?.voiceEnabled ?? fallback.guest.voiceEnabled,
+      voiceName: value?.guest?.voiceName?.trim() || fallback.guest.voiceName || null,
+    },
+  };
+}
+
 const popupLeadMinutes = Number(process.env.LISTEN_MEETING_POPUP_LEAD_MINUTES ?? 2);
 const realtimeHttpUrl = resolveRealtimeHttpUrl();
 const realtimeUrl = resolveRealtimeWsUrl(realtimeHttpUrl);
@@ -213,11 +245,12 @@ let isQuitting = false;
 let desktopCloseBehavior: DesktopCloseBehavior = "ask";
 let desktopRuntimeSecrets: StoredRuntimeSecrets = { aiApiKey: "", transcriptionApiKey: "" };
 let desktopTranslationRuntimeSettings: StoredTranslationRuntimeSettings = getEnvTranslationRuntimeSettings();
+let appAuthService: DesktopSupabaseAuthService;
 let updaterCheckStartedAt: number | null = null;
 let pendingUpdaterStatePatch: Partial<DesktopUpdaterState> | null = null;
 let pendingUpdaterStateTimeout: NodeJS.Timeout | null = null;
 let embeddedRealtimeModuleLoad: Promise<void> | null = null;
-let embeddedRealtimeProcess: Electron.UtilityProcess | null = null;
+let embeddedRealtimeProcess: ChildProcess | null = null;
 let pendingRealtimeRecovery: Promise<void> | null = null;
 
 const minimumUpdaterCheckingDurationMs = 1000;
@@ -245,9 +278,9 @@ let lastAvailableUpdateNotificationVersion: string | null = null;
 let lastDownloadedUpdateNotificationVersion: string | null = null;
 let pendingQuitAfterSessionFinalize = false;
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const hasSingleInstanceLock = app.isPackaged ? app.requestSingleInstanceLock() : true;
 
-if (!hasSingleInstanceLock) {
+if (app.isPackaged && !hasSingleInstanceLock) {
   app.quit();
 }
 
@@ -407,17 +440,18 @@ async function ensureRealtimeServiceAvailable(databasePath: string): Promise<voi
 
   process.env.HOST = process.env.HOST?.trim() || "127.0.0.1";
   process.env.LISTEN_DB_PATH = databasePath;
-  process.env.LISTEN_REALTIME_PORT = process.env.LISTEN_REALTIME_PORT?.trim() || "8787";
+  process.env.LISTEN_REALTIME_PORT = getConfiguredRealtimePort();
   process.env.LISTEN_PUBLIC_BASE_URL = process.env.LISTEN_PUBLIC_BASE_URL?.trim() || realtimeHttpUrl;
 
   embeddedRealtimeModuleLoad = Promise.resolve().then(() => {
-    embeddedRealtimeProcess = utilityProcess.fork(bundledEntry, [], {
+    embeddedRealtimeProcess = spawn(process.execPath, [bundledEntry], {
       cwd: app.getPath("userData"),
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
       },
-      stdio: "pipe",
-      serviceName: "Listen Realtime Service",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     embeddedRealtimeProcess.stdout?.on("data", (chunk) => {
@@ -456,6 +490,12 @@ async function ensureRealtimeServiceAvailable(databasePath: string): Promise<voi
 
 const snapshot: AppSnapshot = {
   calendarConnections: [],
+  appAuth: {
+    configured: false,
+    signedIn: false,
+    pendingEmail: null,
+    user: null,
+  },
   upcomingMeetings: [],
   pendingPopupMeeting: null,
   activeSession: null,
@@ -654,6 +694,7 @@ function configureSessionPermissions(): void {
 function broadcastSnapshot(): AppSnapshot {
   snapshot.calendarConnections = calendarService.getConnections();
   snapshot.upcomingMeetings = calendarService.getUpcomingMeetings();
+  snapshot.appAuth = appAuthService?.getState?.() ?? snapshot.appAuth;
 
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send("state:update", snapshot);
@@ -1132,6 +1173,76 @@ function getRuntimeCapabilitiesSnapshot(): {
   };
 }
 
+async function fetchRealtimeWithAppAuth(pathname: string, init: RequestInit = {}): Promise<Response> {
+  const accessToken = await appAuthService.getAccessToken();
+  if (!accessToken) {
+    throw new Error("Sign into Listen before using app user management.");
+  }
+
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  return fetchWithTimeout(`${realtimeHttpUrl}${pathname}`, {
+    ...init,
+    headers,
+  });
+}
+
+async function refreshDesktopAppAuthProfile(): Promise<AppAuthState> {
+  const authState = appAuthService.getState();
+  if (!authState.signedIn) {
+    return authState;
+  }
+
+  const response = await fetchRealtimeWithAppAuth("/api/auth/me");
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to hydrate signed-in user: ${response.status} ${body}`.trim());
+  }
+
+  const payload = await response.json() as { user?: AppAuthState["user"] | null };
+  return appAuthService.hydrateProfile(payload.user ?? null);
+}
+
+async function listDesktopAdminUsers(): Promise<AdminUserDirectory> {
+  const response = await fetchRealtimeWithAppAuth("/api/admin/users");
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to load users: ${response.status} ${body}`.trim());
+  }
+
+  return response.json() as Promise<AdminUserDirectory>;
+}
+
+async function inviteDesktopAdminUser(email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory> {
+  const inviteResponse = await fetchRealtimeWithAppAuth("/api/admin/users/invitations", {
+    method: "POST",
+    body: JSON.stringify({ email, role }),
+  });
+  if (!inviteResponse.ok) {
+    const body = await inviteResponse.text();
+    throw new Error(`Failed to invite user: ${inviteResponse.status} ${body}`.trim());
+  }
+
+  return listDesktopAdminUsers();
+}
+
+async function updateDesktopAdminUser(profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory> {
+  const response = await fetchRealtimeWithAppAuth(`/api/admin/users/${encodeURIComponent(profileId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to update user: ${response.status} ${body}`.trim());
+  }
+
+  return listDesktopAdminUsers();
+}
+
 async function readDesktopRuntimeSecrets(): Promise<StoredRuntimeSecrets> {
   return normalizeStoredRuntimeSecrets(await sessionStore.readRuntimeSecrets());
 }
@@ -1468,7 +1579,7 @@ async function sendRealtimeSessionStart(meeting: MeetingRecord, meetingContext: 
 
   const client = attachRealtimeClient();
   await client.connect();
-  const participantPreferences = getSessionParticipantTranslationPreferences();
+  const participantPreferences = normalizeSessionParticipantTranslationPreferences(activeSessionParticipantPreferences);
   activeSessionParticipantPreferences = participantPreferences;
   snapshot.participantPreferences = participantPreferences;
   const sent = client.send({
@@ -2438,6 +2549,8 @@ async function startSession(
   }
 
   const { openMeetingWindow = true } = options;
+  const launchContext = await readDesktopMeetingLaunchContext(meeting.id);
+  const participantPreferences = normalizeSessionParticipantTranslationPreferences(launchContext?.participantPreferences);
   snapshot.pendingPopupMeeting = null;
   resetCaptureHealth();
   resetTranslationHealth();
@@ -2445,11 +2558,10 @@ async function startSession(
   updateCaptureHealth("system", "starting", "Waiting for system-audio permission.");
   if (getRuntimeCapabilitiesSnapshot().translationEnabled) {
     const capabilities = getRuntimeCapabilitiesSnapshot();
-    const translationSettings = getEffectiveTranslationRuntimeSettings();
     updateTranslationHealth(
       capabilities.translationReady ? "starting" : "error",
       capabilities.translationReady
-        ? `Preparing host ${translationSettings.hostLanguage} and guest ${translationSettings.guestLanguage} language routing.`
+        ? `Preparing host ${participantPreferences.host.language} and guest ${participantPreferences.guest.language} language routing.`
         : "Translation is enabled, but AI or transcription keys are missing.",
     );
   }
@@ -2465,6 +2577,8 @@ async function startSession(
   };
   activeMeetingRecord = meeting;
   activeMeetingContext = meetingContext;
+  activeSessionParticipantPreferences = participantPreferences;
+  snapshot.participantPreferences = participantPreferences;
   const transcriptionConfigured = getRuntimeCapabilitiesSnapshot().cloudTranscriptionConfigured;
 
   try {
@@ -2552,6 +2666,38 @@ async function stopSession(reason: SessionStopReason): Promise<AppSnapshot> {
 
 function registerHandlers(): void {
   ipcMain.handle("app:get-snapshot", async () => snapshot);
+  ipcMain.handle("auth:get-state", async (): Promise<AppAuthState> => appAuthService.getState());
+  ipcMain.handle("auth:sign-in-google", async (): Promise<AppAuthState> => {
+    await appAuthService.signInWithGoogle();
+    const authState = await refreshDesktopAppAuthProfile();
+    broadcastSnapshot();
+    return authState;
+  });
+  ipcMain.handle("auth:send-magic-link", async (_event, email: string): Promise<AppAuthState> => {
+    const authState = await appAuthService.sendMagicLink(email);
+    broadcastSnapshot();
+    return authState;
+  });
+  ipcMain.handle("auth:complete-email-sign-in", async (): Promise<AppAuthState> => {
+    await appAuthService.completeEmailSignIn();
+    const authState = await refreshDesktopAppAuthProfile();
+    broadcastSnapshot();
+    return authState;
+  });
+  ipcMain.handle("auth:sign-out", async (): Promise<AppAuthState> => {
+    const authState = await appAuthService.signOut();
+    broadcastSnapshot();
+    return authState;
+  });
+  ipcMain.handle("admin-users:list", async (): Promise<AdminUserDirectory> => listDesktopAdminUsers());
+  ipcMain.handle("admin-users:invite", async (_event, email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory> =>
+    inviteDesktopAdminUser(email, role),
+  );
+  ipcMain.handle(
+    "admin-users:update",
+    async (_event, profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory> =>
+      updateDesktopAdminUser(profileId, updates),
+  );
   ipcMain.handle("app:get-runtime-capabilities", async () => getRuntimeCapabilitiesSnapshot());
   ipcMain.handle("runtime-secrets:get", async () => readDesktopRuntimeSecrets());
   ipcMain.handle("runtime-secrets:save", async (_event, secrets: StoredRuntimeSecrets) => saveDesktopRuntimeSecrets(secrets));
@@ -2781,8 +2927,17 @@ app.whenReady().then(async () => {
     calendarSyncClient.syncMeetings.bind(calendarSyncClient),
     meetingResearchClient.listMeetingResearch.bind(meetingResearchClient),
   );
+  appAuthService = new DesktopSupabaseAuthService(sessionStore, shell.openExternal);
   const persisted = await calendarService.initialize();
   snapshot.lastSummary = persisted.lastSummary;
+  snapshot.appAuth = await appAuthService.initialize();
+  if (snapshot.appAuth.signedIn) {
+    try {
+      snapshot.appAuth = await refreshDesktopAppAuthProfile();
+    } catch (error) {
+      console.warn("Failed to hydrate desktop app auth profile during startup.", error);
+    }
+  }
   desktopCloseBehavior = await sessionStore.readDesktopCloseBehavior();
   desktopRuntimeSecrets = await sessionStore.readRuntimeSecrets();
   desktopTranslationRuntimeSettings = await readDesktopTranslationRuntimeSettings();
