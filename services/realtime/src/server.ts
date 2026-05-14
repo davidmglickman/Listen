@@ -7,7 +7,9 @@ import {
   CalendarSyncRequestSchema,
   CompleteResearchJobRequestSchema,
   ListenInboundEventSchema,
+  SessionParticipantTranslationPreferencesSchema,
   type ListenOutboundEvent,
+  type SessionParticipantTranslationPreferences,
   type TranscriptSegment,
 } from "@listen/shared";
 import dotenv from "dotenv";
@@ -23,8 +25,9 @@ import { createSupabaseAdminClient } from "./supabase/client";
 import { SupabaseSyncService } from "./supabase/syncService";
 import { buildConversationTopics } from "./conversation/topics";
 import { buildConversationTurns } from "./conversation/turns";
-import { getRuntimeSecretCapabilities, replacePersistedRuntimeSecrets } from "./runtime/runtimeSecrets";
+import { getRuntimeSecretCapabilities, getTranslationRuntimeConfig, replacePersistedRuntimeSecrets, replacePersistedRuntimeTranslationSettings } from "./runtime/runtimeSecrets";
 import { RollingSessionState } from "./state/sessionState";
+import { createTranscriptTranslator } from "./translation/translator";
 import { createStreamingTranscriptionProvider } from "./transcription/streamingProvider";
 
 function resolveEnvPath(): string | undefined {
@@ -46,9 +49,11 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 const transcriptionProvider = createStreamingTranscriptionProvider();
+const transcriptTranslator = createTranscriptTranslator();
 const sessions = new Map<string, RollingSessionState>();
 const historyStore = new HistoryStore(process.env.LISTEN_DB_PATH?.trim() || path.resolve(process.cwd(), "data", "listen.db"));
 replacePersistedRuntimeSecrets(historyStore.readRuntimeSecrets());
+replacePersistedRuntimeTranslationSettings(historyStore.readRuntimeTranslationSettings());
 const webAppDir = path.resolve(process.cwd(), "apps", "web");
 const supabaseSyncService = new SupabaseSyncService(
   createSupabaseAdminClient(),
@@ -94,6 +99,20 @@ function normalizeQuestionContextDocuments(value: unknown): QuestionContextDocum
   }, [] as QuestionContextDocument[]);
 }
 
+function getDefaultParticipantPreferences(): SessionParticipantTranslationPreferences {
+  const translationConfig = getTranslationRuntimeConfig();
+  return {
+    host: {
+      language: translationConfig.hostLanguage,
+      voiceEnabled: translationConfig.hostVoiceEnabled,
+    },
+    guest: {
+      language: translationConfig.guestLanguage,
+      voiceEnabled: translationConfig.guestVoiceEnabled,
+    },
+  };
+}
+
 async function publishTranscript(ws: WebSocket, sessionState: RollingSessionState, segment: TranscriptSegment): Promise<void> {
   sessionState.appendTranscript(segment);
   send(ws, {
@@ -107,6 +126,40 @@ async function publishTranscript(ws: WebSocket, sessionState: RollingSessionStat
     isFinal: segment.isFinal,
     createdAt: segment.createdAt,
   });
+
+  if (segment.isFinal) {
+    try {
+      const translation = await transcriptTranslator.translateSegment(segment, sessionState.getParticipantPreferences());
+      if (translation) {
+        segment.translatedText = translation.translatedText;
+        segment.translatedLanguage = translation.translatedLanguage;
+        send(ws, {
+          kind: "translated_segment",
+          sessionId: segment.sessionId,
+          segmentId: segment.id,
+          translatedText: translation.translatedText,
+          translatedLanguage: translation.translatedLanguage,
+          createdAt: new Date().toISOString(),
+        });
+        send(ws, {
+          kind: "translation_status",
+          sessionId: segment.sessionId,
+          status: "active",
+          detail: `Translated ${segment.source} audio into ${translation.translatedLanguage}.`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } catch (error) {
+      console.warn(`Transcript translation failed for segment ${segment.id}.`, error);
+      send(ws, {
+        kind: "translation_status",
+        sessionId: segment.sessionId,
+        status: "error",
+        detail: error instanceof Error ? error.message : "Live translation failed for the latest segment.",
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
 
   const prompts = await detectCoachingPrompts(segment, {
     meetingContext: sessionState.getMeetingContext(),
@@ -133,18 +186,33 @@ function send(ws: WebSocket, event: ListenOutboundEvent): void {
   ws.send(JSON.stringify(event));
 }
 
+function broadcast(event: ListenOutboundEvent): void {
+  const payload = JSON.stringify(event);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
+      client.send(payload);
+    }
+  }
+}
+
 app.use(express.json());
 app.get("/", (_request: Request, response: Response) => {
   response.redirect("/app/");
 });
 app.get("/health", (_request: Request, response: Response) => {
   const runtimeSecrets = getRuntimeSecretCapabilities();
+  const translationConfig = getTranslationRuntimeConfig();
   response.json({
     ok: true,
     sessions: sessions.size,
     supabaseConfigured: supabaseSyncService.isConfigured(),
     aiConfigured: runtimeSecrets.aiConfigured,
     transcriptionConfigured: runtimeSecrets.transcriptionConfigured,
+    translationEnabled: translationConfig.enabled,
+    translationHostLanguage: translationConfig.hostLanguage,
+    translationGuestLanguage: translationConfig.guestLanguage,
+    translationHostVoiceName: translationConfig.hostVoiceName,
+    translationGuestVoiceName: translationConfig.guestVoiceName,
     publicBaseUrl,
     websocketUrl: `${publicBaseUrl.replace(/^http/i, "ws")}/ws`,
   });
@@ -162,6 +230,32 @@ app.put("/api/runtime/secrets", (request: Request, response: Response) => {
     aiConfigured: Boolean(secrets.aiApiKey),
     transcriptionConfigured: Boolean(secrets.deepgramApiKey),
   });
+});
+app.get("/api/runtime/translation-settings", (_request: Request, response: Response) => {
+  response.json(historyStore.readRuntimeTranslationSettings());
+});
+app.put("/api/runtime/translation-settings", (request: Request, response: Response) => {
+  const settings = historyStore.writeRuntimeTranslationSettings({
+    enabled: request.body?.enabled === true,
+    hostLanguage: typeof request.body?.hostLanguage === "string"
+      ? request.body.hostLanguage
+      : typeof request.body?.sourceLanguage === "string"
+        ? request.body.sourceLanguage
+        : null,
+    guestLanguage: typeof request.body?.guestLanguage === "string"
+      ? request.body.guestLanguage
+      : typeof request.body?.targetLanguage === "string"
+        ? request.body.targetLanguage
+        : null,
+    hostVoiceEnabled: request.body?.hostVoiceEnabled === true,
+    guestVoiceEnabled: request.body?.guestVoiceEnabled === true,
+    hostVoiceName: typeof request.body?.hostVoiceName === "string" ? request.body.hostVoiceName : null,
+    guestVoiceName: typeof request.body?.guestVoiceName === "string" ? request.body.guestVoiceName : null,
+    transcriptionFlushMs: typeof request.body?.transcriptionFlushMs === "number" ? request.body.transcriptionFlushMs : null,
+    transcriptionFlushBytes: typeof request.body?.transcriptionFlushBytes === "number" ? request.body.transcriptionFlushBytes : null,
+  });
+  replacePersistedRuntimeTranslationSettings(settings);
+  response.json(settings);
 });
 app.get("/api/admin/supabase/status", (_request: Request, response: Response) => {
   response.json({
@@ -306,7 +400,39 @@ app.get("/api/live-sessions/:sessionId/debug", (request: Request, response: Resp
     turns: buildConversationTurns(transcript),
     topics: buildConversationTopics(transcript),
     speakerResolution: sessionState.getSpeakerResolutionTraces(),
+    participantPreferences: sessionState.getParticipantPreferences() ?? getDefaultParticipantPreferences(),
   });
+});
+app.get("/api/live-sessions/:sessionId/participant-preferences", (request: Request, response: Response) => {
+  const sessionState = sessions.get(getRouteParam(request.params.sessionId));
+  if (!sessionState) {
+    response.status(404).json({ error: "Active session not found." });
+    return;
+  }
+
+  response.json(sessionState.getParticipantPreferences() ?? getDefaultParticipantPreferences());
+});
+app.put("/api/live-sessions/:sessionId/participant-preferences", (request: Request, response: Response) => {
+  const sessionState = sessions.get(getRouteParam(request.params.sessionId));
+  if (!sessionState) {
+    response.status(404).json({ error: "Active session not found." });
+    return;
+  }
+
+  const parsed = SessionParticipantTranslationPreferencesSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Invalid participant preferences payload." });
+    return;
+  }
+
+  const participantPreferences = sessionState.replaceParticipantPreferences(parsed.data);
+  broadcast({
+    kind: "participant_preferences_updated",
+    sessionId: sessionState.sessionId,
+    participantPreferences: participantPreferences ?? getDefaultParticipantPreferences(),
+    createdAt: new Date().toISOString(),
+  });
+  response.json(participantPreferences);
 });
 app.post("/api/questions/context", async (request: Request, response: Response) => {
   if (typeof request.body?.question !== "string" || !request.body.question.trim()) {
@@ -438,9 +564,14 @@ wss.on("connection", (ws: WebSocket) => {
       const sessionState = new RollingSessionState(
         event.sessionId,
         event.meetingId,
+        event.meetingTitle,
+        event.meetingProvider,
+        event.calendarProvider,
+        new Date().toISOString(),
         event.expectedEndAt,
         event.meetingContext,
         historyStore.getCoachingGuidance(),
+        event.participantPreferences ?? null,
       );
       sessions.set(event.sessionId, sessionState);
       await transcriptionProvider.startSession(
@@ -503,6 +634,22 @@ wss.on("connection", (ws: WebSocket) => {
 
     if (event.kind === "session_stop") {
       const summary = await sessionState.complete(event.reason);
+      historyStore.writeCompletedSession({
+        sessionId: sessionState.sessionId,
+        meetingId: sessionState.meetingId,
+        meetingTitle: sessionState.meetingTitle,
+        meetingProvider: sessionState.meetingProvider,
+        calendarProvider: sessionState.calendarProvider,
+        startedAt: sessionState.startedAt,
+        expectedEndAt: sessionState.expectedEndAt,
+        completedAt: summary.completedAt,
+        stopReason: event.reason,
+        summary,
+        transcript: sessionState.getTranscript(),
+        coaching: sessionState.getPrompts(),
+        context: sessionState.getMeetingContext(),
+        participantPreferences: sessionState.getParticipantPreferences(),
+      });
       await transcriptionProvider.stopSession(event.sessionId);
       send(ws, {
         kind: "summary_ready",

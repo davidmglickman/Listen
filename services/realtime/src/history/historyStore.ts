@@ -2,7 +2,20 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import type { CoachingProfile, CoachingSettings, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionSummary } from "@listen/shared";
+import type {
+  CoachingProfile,
+  CoachingPrompt,
+  CoachingSettings,
+  MeetingContext,
+  MeetingContextTemplate,
+  OrgContextDocument,
+  SessionHistoryDetail,
+  SessionHistoryItem,
+  SessionParticipantTranslationPreferences,
+  SessionStopReason,
+  SessionSummary,
+  TranscriptSegment,
+} from "@listen/shared";
 
 const DEFAULT_COACHING_SETTINGS: CoachingSettings = {
   style: "supportive",
@@ -31,6 +44,24 @@ interface SessionRow {
   stop_reason: SessionHistoryItem["stopReason"];
   summary_json: string;
   context_json: string | null;
+  participant_preferences_json: string | null;
+}
+
+interface CompletedSessionRecord {
+  sessionId: string;
+  meetingId: string;
+  meetingTitle: string;
+  meetingProvider: SessionHistoryItem["meetingProvider"];
+  calendarProvider: SessionHistoryItem["calendarProvider"];
+  startedAt: string;
+  expectedEndAt: string;
+  completedAt: string;
+  stopReason: SessionStopReason;
+  summary: SessionSummary;
+  transcript: TranscriptSegment[];
+  coaching: CoachingPrompt[];
+  context: MeetingContext | null;
+  participantPreferences: SessionParticipantTranslationPreferences | null;
 }
 
 function parseJson<T>(value: string | null): T | null {
@@ -59,7 +90,8 @@ export class HistoryStore {
         completed_at TEXT NOT NULL,
         stop_reason TEXT NOT NULL,
         summary_json TEXT NOT NULL,
-        context_json TEXT
+        context_json TEXT,
+        participant_preferences_json TEXT
       );
 
       CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -120,6 +152,7 @@ export class HistoryStore {
     this.ensureColumn("transcript_segments", "speaker_label", "TEXT");
     this.ensureColumn("coaching_prompts", "speaker_id", "INTEGER");
     this.ensureColumn("coaching_prompts", "speaker_label", "TEXT");
+    this.ensureColumn("sessions", "participant_preferences_json", "TEXT");
     this.ensureColumn("coaching_profiles", "settings_json", "TEXT");
     this.ensureColumn("org_context_documents", "source_url", "TEXT");
     this.seedDefaults();
@@ -138,11 +171,77 @@ export class HistoryStore {
     return this.readRuntimeSecrets();
   }
 
+  readRuntimeTranslationSettings(): {
+    enabled: boolean;
+    hostLanguage: string | null;
+    guestLanguage: string | null;
+    hostVoiceEnabled: boolean;
+    guestVoiceEnabled: boolean;
+    hostVoiceName: string | null;
+    guestVoiceName: string | null;
+    transcriptionFlushMs: number | null;
+    transcriptionFlushBytes: number | null;
+  } {
+    const flushMs = this.readRuntimeSetting("translation_transcription_flush_ms");
+    const flushBytes = this.readRuntimeSetting("translation_transcription_flush_bytes");
+
+    return {
+      enabled: this.readRuntimeSetting("translation_enabled") === "true",
+      hostLanguage: this.readRuntimeSetting("translation_host_language") || this.readRuntimeSetting("translation_source_language"),
+      guestLanguage: this.readRuntimeSetting("translation_guest_language") || this.readRuntimeSetting("translation_target_language"),
+      hostVoiceEnabled: this.readRuntimeSetting("translation_host_voice_enabled") === "true",
+      guestVoiceEnabled: this.readRuntimeSetting("translation_guest_voice_enabled") === "true",
+      hostVoiceName: this.readRuntimeSetting("translation_host_voice_name"),
+      guestVoiceName: this.readRuntimeSetting("translation_guest_voice_name"),
+      transcriptionFlushMs: flushMs && /^\d+$/.test(flushMs) ? Number(flushMs) : null,
+      transcriptionFlushBytes: flushBytes && /^\d+$/.test(flushBytes) ? Number(flushBytes) : null,
+    };
+  }
+
+  writeRuntimeTranslationSettings(value: {
+    enabled: boolean;
+    hostLanguage: string | null;
+    guestLanguage: string | null;
+    hostVoiceEnabled: boolean;
+    guestVoiceEnabled: boolean;
+    hostVoiceName: string | null;
+    guestVoiceName: string | null;
+    transcriptionFlushMs: number | null;
+    transcriptionFlushBytes: number | null;
+  }): {
+    enabled: boolean;
+    hostLanguage: string | null;
+    guestLanguage: string | null;
+    hostVoiceEnabled: boolean;
+    guestVoiceEnabled: boolean;
+    hostVoiceName: string | null;
+    guestVoiceName: string | null;
+    transcriptionFlushMs: number | null;
+    transcriptionFlushBytes: number | null;
+  } {
+    this.writeRuntimeSetting("translation_enabled", value.enabled ? "true" : "false");
+    this.writeRuntimeSetting("translation_host_language", value.hostLanguage);
+    this.writeRuntimeSetting("translation_guest_language", value.guestLanguage);
+    this.writeRuntimeSetting("translation_host_voice_enabled", value.hostVoiceEnabled ? "true" : "false");
+    this.writeRuntimeSetting("translation_guest_voice_enabled", value.guestVoiceEnabled ? "true" : "false");
+    this.writeRuntimeSetting("translation_host_voice_name", value.hostVoiceName);
+    this.writeRuntimeSetting("translation_guest_voice_name", value.guestVoiceName);
+    this.writeRuntimeSetting(
+      "translation_transcription_flush_ms",
+      typeof value.transcriptionFlushMs === "number" && Number.isFinite(value.transcriptionFlushMs) ? String(Math.max(1, Math.floor(value.transcriptionFlushMs))) : null,
+    );
+    this.writeRuntimeSetting(
+      "translation_transcription_flush_bytes",
+      typeof value.transcriptionFlushBytes === "number" && Number.isFinite(value.transcriptionFlushBytes) ? String(Math.max(1, Math.floor(value.transcriptionFlushBytes))) : null,
+    );
+    return this.readRuntimeTranslationSettings();
+  }
+
   listSessions(limit = 50): SessionHistoryItem[] {
     const rows = this.database
       .prepare(
         `
-          SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json
+          SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json, participant_preferences_json
           FROM sessions
           ORDER BY completed_at DESC
           LIMIT ?
@@ -157,7 +256,7 @@ export class HistoryStore {
     const row = this.database
       .prepare(
         `
-          SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json
+          SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json, participant_preferences_json
           FROM sessions
           WHERE session_id = ?
         `,
@@ -219,6 +318,103 @@ export class HistoryStore {
     this.database.prepare("DELETE FROM coaching_prompts WHERE session_id = ?").run(sessionId);
     this.database.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
     return true;
+  }
+
+  writeCompletedSession(record: CompletedSessionRecord): void {
+    this.database.exec("BEGIN");
+    try {
+      this.database
+        .prepare(
+          `
+            INSERT INTO sessions (
+              session_id,
+              meeting_id,
+              meeting_title,
+              meeting_provider,
+              calendar_provider,
+              started_at,
+              expected_end_at,
+              completed_at,
+              stop_reason,
+              summary_json,
+              context_json,
+              participant_preferences_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+              meeting_id = excluded.meeting_id,
+              meeting_title = excluded.meeting_title,
+              meeting_provider = excluded.meeting_provider,
+              calendar_provider = excluded.calendar_provider,
+              started_at = excluded.started_at,
+              expected_end_at = excluded.expected_end_at,
+              completed_at = excluded.completed_at,
+              stop_reason = excluded.stop_reason,
+              summary_json = excluded.summary_json,
+              context_json = excluded.context_json,
+              participant_preferences_json = excluded.participant_preferences_json
+          `,
+        )
+        .run(
+          record.sessionId,
+          record.meetingId,
+          record.meetingTitle,
+          record.meetingProvider,
+          record.calendarProvider,
+          record.startedAt,
+          record.expectedEndAt,
+          record.completedAt,
+          record.stopReason,
+          JSON.stringify(record.summary),
+          JSON.stringify(record.context),
+          JSON.stringify(record.participantPreferences),
+        );
+
+      this.database.prepare("DELETE FROM transcript_segments WHERE session_id = ?").run(record.sessionId);
+      this.database.prepare("DELETE FROM coaching_prompts WHERE session_id = ?").run(record.sessionId);
+
+      const transcriptStatement = this.database.prepare(
+        `
+          INSERT INTO transcript_segments (id, session_id, source, speaker_id, speaker_label, text, is_final, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      );
+      for (const segment of record.transcript) {
+        transcriptStatement.run(
+          segment.id,
+          segment.sessionId,
+          segment.source,
+          segment.speakerId ?? null,
+          segment.speakerLabel ?? null,
+          segment.text,
+          segment.isFinal ? 1 : 0,
+          segment.createdAt,
+        );
+      }
+
+      const coachingStatement = this.database.prepare(
+        `
+          INSERT INTO coaching_prompts (id, session_id, speaker_id, speaker_label, severity, title, message, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      );
+      for (const prompt of record.coaching) {
+        coachingStatement.run(
+          prompt.id,
+          prompt.sessionId,
+          prompt.speakerId ?? null,
+          prompt.speakerLabel ?? null,
+          prompt.severity,
+          prompt.title,
+          prompt.message,
+          prompt.createdAt,
+        );
+      }
+
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   listCoachingProfiles(): CoachingProfile[] {
@@ -378,6 +574,7 @@ export class HistoryStore {
       stopReason: row.stop_reason,
       summary: JSON.parse(row.summary_json) as SessionSummary,
       context: parseJson(row.context_json),
+      participantPreferences: parseJson<SessionParticipantTranslationPreferences>(row.participant_preferences_json),
     };
   }
 

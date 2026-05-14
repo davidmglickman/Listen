@@ -23,6 +23,17 @@ export const MeetingContextSchema = z.object({
   notes: z.string(),
 });
 
+export const TranslationParticipantPreferenceSchema = z.object({
+  language: z.string().min(1),
+  voiceEnabled: z.boolean(),
+  voiceName: z.string().min(1).nullable().optional(),
+});
+
+export const SessionParticipantTranslationPreferencesSchema = z.object({
+  host: TranslationParticipantPreferenceSchema,
+  guest: TranslationParticipantPreferenceSchema,
+});
+
 const MeetingAttendeeEventSchema = z.object({
   fullName: z.string().min(1),
   email: z.string().optional(),
@@ -38,6 +49,7 @@ export const SessionStartEventSchema = z.object({
   calendarProvider: CalendarProviderSchema,
   meetingContext: MeetingContextSchema.nullable(),
   attendees: z.array(MeetingAttendeeEventSchema).optional(),
+  participantPreferences: SessionParticipantTranslationPreferencesSchema.optional(),
 });
 
 export const SessionStopEventSchema = z.object({
@@ -77,6 +89,30 @@ export const TranscriptSegmentEventSchema = z.object({
   createdAt: z.string(),
 });
 
+export const TranslatedSegmentEventSchema = z.object({
+  kind: z.literal("translated_segment"),
+  sessionId: z.string(),
+  segmentId: z.string(),
+  translatedText: z.string().min(1),
+  translatedLanguage: z.string().min(1),
+  createdAt: z.string(),
+});
+
+export const TranslationStatusEventSchema = z.object({
+  kind: z.literal("translation_status"),
+  sessionId: z.string(),
+  status: z.enum(["idle", "starting", "active", "error"]),
+  detail: z.string(),
+  createdAt: z.string(),
+});
+
+export const ParticipantPreferencesUpdatedEventSchema = z.object({
+  kind: z.literal("participant_preferences_updated"),
+  sessionId: z.string(),
+  participantPreferences: SessionParticipantTranslationPreferencesSchema,
+  createdAt: z.string(),
+});
+
 export const CoachingPromptEventSchema = z.object({
   kind: z.literal("coaching_prompt"),
   sessionId: z.string(),
@@ -109,6 +145,9 @@ export const ListenInboundEventSchema = z.discriminatedUnion("kind", [
 
 export const ListenOutboundEventSchema = z.discriminatedUnion("kind", [
   TranscriptSegmentEventSchema,
+  TranslatedSegmentEventSchema,
+  TranslationStatusEventSchema,
+  ParticipantPreferencesUpdatedEventSchema,
   CoachingPromptEventSchema,
   SummaryReadyEventSchema,
 ]);

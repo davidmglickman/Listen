@@ -68,6 +68,17 @@ export interface MeetingContext {
   notes: string;
 }
 
+export interface TranslationParticipantPreference {
+  language: string;
+  voiceEnabled: boolean;
+  voiceName?: string | null;
+}
+
+export interface SessionParticipantTranslationPreferences {
+  host: TranslationParticipantPreference;
+  guest: TranslationParticipantPreference;
+}
+
 export interface TranscriptSegment {
   id: string;
   sessionId: string;
@@ -75,6 +86,8 @@ export interface TranscriptSegment {
   speakerId?: number | null;
   speakerLabel?: string | null;
   text: string;
+  translatedText?: string | null;
+  translatedLanguage?: string | null;
   isFinal: boolean;
   createdAt: string;
 }
@@ -112,6 +125,7 @@ export interface SessionHistoryItem {
   stopReason: SessionStopReason;
   summary: SessionSummary;
   context: MeetingContext | null;
+  participantPreferences: SessionParticipantTranslationPreferences | null;
 }
 
 export interface SessionHistoryDetail extends SessionHistoryItem {
@@ -178,12 +192,20 @@ export interface CaptureHealth {
   system: AudioCaptureHealth;
 }
 
+export interface TranslationHealth {
+  status: "idle" | "starting" | "active" | "error";
+  detail: string;
+  lastUpdatedAt: string | null;
+}
+
 export interface AppSnapshot {
   calendarConnections: CalendarConnection[];
   upcomingMeetings: MeetingRecord[];
   pendingPopupMeeting: MeetingRecord | null;
   activeSession: ActiveSession | null;
+  participantPreferences: SessionParticipantTranslationPreferences | null;
   captureHealth: CaptureHealth;
+  translationHealth: TranslationHealth;
   transcript: TranscriptSegment[];
   coaching: CoachingPrompt[];
   lastSummary: SessionSummary | null;

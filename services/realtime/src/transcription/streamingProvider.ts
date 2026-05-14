@@ -5,7 +5,7 @@ import {
   type SpeakerResolutionDecision,
   type SpeakerResolutionTrace,
 } from "../diagnostics/speakerTrace";
-import { getDeepgramRuntimeConfig } from "../runtime/runtimeSecrets";
+import { getDeepgramRuntimeConfig, getTranslationRuntimeConfig } from "../runtime/runtimeSecrets";
 
 export interface TranscriptionSegment {
   source: AudioSourceKind;
@@ -79,9 +79,37 @@ const CHANNEL_COUNT = 1;
 const BYTES_PER_SAMPLE = 2;
 // Short 2-3s flushes are fast, but they starve diarization of enough turn-taking context.
 // A larger window improves guest separation at the cost of a bit more latency.
-const TARGET_FLUSH_MS = 7_500;
-const TARGET_FLUSH_BYTES = STREAM_SAMPLE_RATE * CHANNEL_COUNT * BYTES_PER_SAMPLE * 8;
+const DEFAULT_FLUSH_MS = 7_500;
+const DEFAULT_FLUSH_BYTES = STREAM_SAMPLE_RATE * CHANNEL_COUNT * BYTES_PER_SAMPLE * 8;
 const GUEST_PARTICIPANT_REUSE_WINDOW_MS = 30_000;
+
+function readPositiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
+function getTargetFlushMs(): number {
+  const translationConfig = getTranslationRuntimeConfig();
+  const defaultFlushMs = translationConfig.enabled ? 2_500 : DEFAULT_FLUSH_MS;
+  return translationConfig.transcriptionFlushMs ?? readPositiveIntegerEnv("LISTEN_TRANSCRIPTION_FLUSH_MS", defaultFlushMs);
+}
+
+function getTargetFlushBytes(): number {
+  const translationConfig = getTranslationRuntimeConfig();
+  const defaultFlushBytes = translationConfig.enabled
+    ? STREAM_SAMPLE_RATE * CHANNEL_COUNT * BYTES_PER_SAMPLE * 3
+    : DEFAULT_FLUSH_BYTES;
+  return translationConfig.transcriptionFlushBytes ?? readPositiveIntegerEnv("LISTEN_TRANSCRIPTION_FLUSH_BYTES", defaultFlushBytes);
+}
 
 function looksLikeEmail(value: string): boolean {
   return /@/.test(value);
@@ -387,7 +415,7 @@ export class DeepgramStreamingTranscriptionProvider implements StreamingTranscri
     sourceState.chunks.push(chunk);
     sourceState.byteLength += chunk.byteLength;
 
-    if (sourceState.byteLength >= TARGET_FLUSH_BYTES) {
+    if (sourceState.byteLength >= getTargetFlushBytes()) {
       await this.flushSource(sessionId, source);
       return;
     }
@@ -395,7 +423,7 @@ export class DeepgramStreamingTranscriptionProvider implements StreamingTranscri
     if (!sourceState.flushTimer) {
       sourceState.flushTimer = setTimeout(() => {
         void this.flushSource(sessionId, source);
-      }, TARGET_FLUSH_MS);
+      }, getTargetFlushMs());
     }
   }
 
@@ -526,7 +554,7 @@ export class DeepgramStreamingTranscriptionProvider implements StreamingTranscri
       if (sourceState.byteLength && !sourceState.flushTimer) {
         sourceState.flushTimer = setTimeout(() => {
           void this.flushSource(sessionId, source);
-        }, TARGET_FLUSH_MS);
+        }, getTargetFlushMs());
       }
     }
   }

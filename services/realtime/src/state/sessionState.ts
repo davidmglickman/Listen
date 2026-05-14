@@ -1,4 +1,14 @@
-import type { CoachingPrompt, CoachingSettings, MeetingContext, SessionStopReason, SessionSummary, TranscriptSegment } from "@listen/shared";
+import type {
+  CalendarProvider,
+  CoachingPrompt,
+  CoachingSettings,
+  MeetingContext,
+  MeetingProvider,
+  SessionParticipantTranslationPreferences,
+  SessionStopReason,
+  SessionSummary,
+  TranscriptSegment,
+} from "@listen/shared";
 
 import type { SpeakerResolutionTrace } from "../diagnostics/speakerTrace";
 import { summarizeSession } from "../summary/summarizeSession";
@@ -29,14 +39,22 @@ export class RollingSessionState {
   private readonly prompts: CoachingPrompt[] = [];
   private readonly speakerResolutionTraces: SpeakerResolutionTrace[] = [];
   private readonly recentPromptTimes = new Map<string, number>();
+  private participantPreferences: SessionParticipantTranslationPreferences | null;
 
   constructor(
     public readonly sessionId: string,
     public readonly meetingId: string,
+    public readonly meetingTitle: string,
+    public readonly meetingProvider: MeetingProvider,
+    public readonly calendarProvider: CalendarProvider,
+    public readonly startedAt: string,
     public readonly expectedEndAt: string,
     private readonly meetingContext: MeetingContext | null,
     private readonly coachingGuidance: SessionCoachingGuidance,
-  ) {}
+    participantPreferences: SessionParticipantTranslationPreferences | null,
+  ) {
+    this.participantPreferences = participantPreferences;
+  }
 
   appendTranscript(segment: TranscriptSegment): void {
     this.transcript.push(segment);
@@ -92,6 +110,15 @@ export class RollingSessionState {
 
   getCoachingGuidance(): SessionCoachingGuidance {
     return this.coachingGuidance;
+  }
+
+  getParticipantPreferences(): SessionParticipantTranslationPreferences | null {
+    return this.participantPreferences;
+  }
+
+  replaceParticipantPreferences(value: SessionParticipantTranslationPreferences | null): SessionParticipantTranslationPreferences | null {
+    this.participantPreferences = value;
+    return this.participantPreferences;
   }
 
   async complete(_reason: SessionStopReason): Promise<SessionSummary> {

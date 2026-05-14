@@ -8,7 +8,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/services/realtime/src/server.js",
-    "debug:replay": "tsx src/debug/replaySession.ts"
+    "debug:replay": "tsx src/debug/replaySession.ts",
+    "debug:research": "tsx src/debug/researchSnapshot.ts",
+    "test:research": "tsx --test src/research/provider.test.ts"
   },
   "dependencies": {
     "@listen/shared": "0.1.0",

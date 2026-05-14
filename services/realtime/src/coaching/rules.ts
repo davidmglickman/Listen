@@ -21,6 +21,14 @@ function detectRule(segment: TranscriptSegment): CoachingRuleType | null {
   return null;
 }
 
+function getPromptSeverity(rule: CoachingRuleType, context: CoachingMessageContext): CoachingPrompt["severity"] {
+  if (context.meetingContext?.callFunction === "sales") {
+    return "info";
+  }
+
+  return rule === "filler" ? "warning" : "info";
+}
+
 export async function detectCoachingPrompts(segment: TranscriptSegment, context: CoachingMessageContext = {}): Promise<CoachingPrompt[]> {
   if (!segment.isFinal || segment.source !== "microphone") {
     return [];
@@ -42,7 +50,7 @@ export async function detectCoachingPrompts(segment: TranscriptSegment, context:
       sessionId: segment.sessionId,
       speakerId: segment.speakerId,
       speakerLabel: segment.speakerLabel,
-      severity: rule === "filler" ? "warning" : "info",
+      severity: getPromptSeverity(rule, context),
       title: coachMessage.title,
       message: coachMessage.message,
       createdAt: new Date().toISOString(),

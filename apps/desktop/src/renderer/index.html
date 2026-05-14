@@ -2046,6 +2046,51 @@
                     </div>
                     <button id="save-runtime-secrets" class="secondary">Save API Keys</button>
                   </div>
+                  <div class="card stack">
+                    <div>
+                      <h3>Translation Runtime</h3>
+                      <p class="muted">Configure live translation defaults for this computer without editing packaged environment files.</p>
+                    </div>
+                    <div class="field-grid">
+                      <label>
+                        <span>Enable live translation</span>
+                        <input id="translation-enabled" type="checkbox" />
+                      </label>
+                      <label>
+                        Host language
+                        <input id="translation-host-language" type="text" placeholder="English" autocomplete="off" />
+                      </label>
+                      <label>
+                        Guest language
+                        <input id="translation-guest-language" type="text" placeholder="Portuguese (Brazil)" autocomplete="off" />
+                      </label>
+                      <label>
+                        <span>Host voice opt-in</span>
+                        <input id="translation-host-voice-enabled" type="checkbox" />
+                      </label>
+                      <label>
+                        <span>Guest voice opt-in</span>
+                        <input id="translation-guest-voice-enabled" type="checkbox" />
+                      </label>
+                      <label>
+                        Host playback voice
+                        <select id="translation-host-voice-name"></select>
+                      </label>
+                      <label>
+                        Guest playback voice
+                        <select id="translation-guest-voice-name"></select>
+                      </label>
+                      <label>
+                        Flush window (ms)
+                        <input id="translation-flush-ms" type="number" min="1" step="100" placeholder="2500" />
+                      </label>
+                      <label>
+                        Flush bytes
+                        <input id="translation-flush-bytes" type="number" min="1" step="1000" placeholder="96000" />
+                      </label>
+                    </div>
+                    <button id="save-translation-settings" class="secondary">Save Translation Settings</button>
+                  </div>
                 </div>
                 <div id="setup-panel-coaching" class="workspace-panel">
                   <div>
@@ -2169,10 +2214,23 @@
         runtimeCapabilities: {
           aiConfigured: false,
           cloudTranscriptionConfigured: false,
+          translationEnabled: false,
+          translationReady: false,
         },
         runtimeSecrets: {
           aiApiKey: "",
           transcriptionApiKey: "",
+        },
+        translationRuntimeSettings: {
+          enabled: false,
+          hostLanguage: "English",
+          guestLanguage: "Portuguese (Brazil)",
+          hostVoiceEnabled: false,
+          guestVoiceEnabled: false,
+          hostVoiceName: "",
+          guestVoiceName: "",
+          transcriptionFlushMs: 2500,
+          transcriptionFlushBytes: 96000,
         },
         updater: {
           enabled: false,
@@ -2192,6 +2250,7 @@
           },
         },
         orgDocuments: [],
+        orgDocumentsStatus: "idle",
         meetingTemplates: [],
         selectedMeetingTemplateId: "",
         editingMeetingTemplateId: null,
@@ -2242,6 +2301,8 @@
         pendingState: null,
         timeoutId: null,
       };
+      let orgDocumentsRefreshPromise = null;
+      let orgDocumentsRetryTimeoutId = null;
       const captureState = {
         sessionId: null,
         system: null,
@@ -2267,6 +2328,11 @@
         permissionDenied: false,
         lastTriggeredAt: 0,
       };
+      const translatedSpeechState = {
+        enabled: readTranslatedSpeechPreference(),
+        sessionId: null,
+        spokenSegmentIds: new Set(),
+      };
       const BACKGROUND_AUTO_START_RMS_THRESHOLD = 0.035;
       const BACKGROUND_AUTO_START_SUSTAIN_MS = 4000;
       const BACKGROUND_AUTO_START_POLL_MS = 1000;
@@ -2283,6 +2349,16 @@
       const runtimeAiApiKeyEl = document.getElementById("runtime-ai-api-key");
       const runtimeTranscriptionApiKeyEl = document.getElementById("runtime-transcription-api-key");
       const saveRuntimeSecretsButtonEl = document.getElementById("save-runtime-secrets");
+      const translationEnabledEl = document.getElementById("translation-enabled");
+      const translationHostLanguageEl = document.getElementById("translation-host-language");
+      const translationGuestLanguageEl = document.getElementById("translation-guest-language");
+      const translationHostVoiceEnabledEl = document.getElementById("translation-host-voice-enabled");
+      const translationGuestVoiceEnabledEl = document.getElementById("translation-guest-voice-enabled");
+      const translationFlushMsEl = document.getElementById("translation-flush-ms");
+      const translationFlushBytesEl = document.getElementById("translation-flush-bytes");
+      const translationHostVoiceNameEl = document.getElementById("translation-host-voice-name");
+      const translationGuestVoiceNameEl = document.getElementById("translation-guest-voice-name");
+      const saveTranslationSettingsButtonEl = document.getElementById("save-translation-settings");
       const navButtons = Array.from(document.querySelectorAll("[data-page].nav-button"));
     const prepTabButtons = Array.from(document.querySelectorAll("[data-prep-tab]"));
       const reviewTabButtons = Array.from(document.querySelectorAll("[data-review-tab]"));
@@ -2365,6 +2441,7 @@
           upcomingMeetings: [],
           pendingPopupMeeting: null,
           activeSession: null,
+          participantPreferences: null,
           captureHealth: {
             microphone: {
               status: "idle",
@@ -2378,6 +2455,11 @@
               chunkCount: 0,
               lastActivityAt: null,
             },
+          },
+          translationHealth: {
+            status: "idle",
+            detail: "Live translation is idle.",
+            lastUpdatedAt: null,
           },
           transcript: [],
           coaching: [],
@@ -2396,6 +2478,206 @@
 
       function normalizeEmail(value) {
         return String(value || "").trim().toLowerCase();
+      }
+
+      function readTranslatedSpeechPreference() {
+        try {
+          return window.localStorage.getItem("listen.translatedSpeechEnabled") === "true";
+        } catch {
+          return false;
+        }
+      }
+
+      function writeTranslatedSpeechPreference(enabled) {
+        try {
+          window.localStorage.setItem("listen.translatedSpeechEnabled", enabled ? "true" : "false");
+        } catch {
+          // Ignore localStorage failures in the desktop renderer.
+        }
+      }
+
+      function normalizeSpeechLanguageTag(value) {
+        const normalized = String(value || "").trim().toLowerCase();
+        if (!normalized) {
+          return "en-US";
+        }
+
+        if (/^[a-z]{2}(-[a-z]{2})?$/i.test(normalized)) {
+          return normalized.length === 2 ? `${normalized}-${normalized.toUpperCase()}` : normalized;
+        }
+
+        if (normalized.includes("pt-br") || normalized.includes("brazil")) {
+          return "pt-BR";
+        }
+
+        if (normalized.includes("portuguese") || normalized.startsWith("pt")) {
+          return "pt-PT";
+        }
+
+        if (normalized.includes("english") || normalized.startsWith("en")) {
+          return normalized.includes("british") ? "en-GB" : "en-US";
+        }
+
+        if (normalized.includes("spanish") || normalized.startsWith("es")) {
+          return "es-ES";
+        }
+
+        if (normalized.includes("french") || normalized.startsWith("fr")) {
+          return "fr-FR";
+        }
+
+        if (normalized.includes("german") || normalized.startsWith("de")) {
+          return "de-DE";
+        }
+
+        if (normalized.includes("italian") || normalized.startsWith("it")) {
+          return "it-IT";
+        }
+
+        if (normalized.includes("japanese") || normalized.startsWith("ja")) {
+          return "ja-JP";
+        }
+
+        return "en-US";
+      }
+
+      function resolveSpeechVoice(languageTag, preferredVoiceName) {
+        const voices = window.speechSynthesis?.getVoices?.() || [];
+        if (!voices.length) {
+          return null;
+        }
+
+        const normalizedPreferredVoiceName = String(preferredVoiceName || "").trim().toLowerCase();
+        if (normalizedPreferredVoiceName) {
+          const preferredVoice = voices.find((voice) => voice.name?.trim().toLowerCase() === normalizedPreferredVoiceName);
+          if (preferredVoice) {
+            return preferredVoice;
+          }
+        }
+
+        return voices.find((voice) => voice.lang === languageTag)
+          || voices.find((voice) => voice.lang?.toLowerCase().startsWith(`${languageTag.slice(0, 2).toLowerCase()}-`))
+          || voices.find((voice) => voice.lang?.toLowerCase() === languageTag.slice(0, 2).toLowerCase())
+          || null;
+      }
+
+      function getSegmentParticipantPreference(segment) {
+        const participantPreferences = state.snapshot?.participantPreferences;
+        if (segment?.source === "microphone") {
+          return participantPreferences?.guest || {
+            language: state.translationRuntimeSettings.guestLanguage,
+            voiceEnabled: state.translationRuntimeSettings.guestVoiceEnabled,
+            voiceName: state.translationRuntimeSettings.guestVoiceName,
+          };
+        }
+
+        return participantPreferences?.host || {
+          language: state.translationRuntimeSettings.hostLanguage,
+          voiceEnabled: state.translationRuntimeSettings.hostVoiceEnabled,
+          voiceName: state.translationRuntimeSettings.hostVoiceName,
+        };
+      }
+
+      function speakTranslatedSegment(segment) {
+        if (!window.speechSynthesis || !segment?.translatedText) {
+          return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(segment.translatedText);
+        const participantPreference = getSegmentParticipantPreference(segment);
+        const languageTag = normalizeSpeechLanguageTag(segment.translatedLanguage || participantPreference.language);
+        utterance.lang = languageTag;
+        const voice = resolveSpeechVoice(languageTag, participantPreference.voiceName);
+        if (voice) {
+          utterance.voice = voice;
+        }
+        window.speechSynthesis.speak(utterance);
+      }
+
+      function isVoiceEnabledForSegment(segment) {
+        const participantPreferences = state.snapshot?.participantPreferences;
+        if (segment?.source === "microphone") {
+          return participantPreferences?.guest?.voiceEnabled ?? state.translationRuntimeSettings.guestVoiceEnabled;
+        }
+
+        return participantPreferences?.host?.voiceEnabled ?? state.translationRuntimeSettings.hostVoiceEnabled;
+      }
+
+      function getDisplayedTranslationPreferences() {
+        const participantPreferences = state.snapshot?.activeSession ? state.snapshot?.participantPreferences : null;
+        return participantPreferences || {
+          host: {
+            language: state.translationRuntimeSettings.hostLanguage,
+            voiceEnabled: state.translationRuntimeSettings.hostVoiceEnabled,
+            voiceName: state.translationRuntimeSettings.hostVoiceName,
+          },
+          guest: {
+            language: state.translationRuntimeSettings.guestLanguage,
+            voiceEnabled: state.translationRuntimeSettings.guestVoiceEnabled,
+            voiceName: state.translationRuntimeSettings.guestVoiceName,
+          },
+        };
+      }
+
+      function formatParticipantAudioPreference(preference) {
+        if (!preference) {
+          return "Not configured";
+        }
+
+        const parts = [preference.language || "Unknown language"];
+        parts.push(preference.voiceEnabled ? "voice on" : "voice off");
+        parts.push(preference.voiceName ? `voice ${preference.voiceName}` : "automatic voice");
+        return parts.join(" · ");
+      }
+
+      function markCurrentTranslatedSegmentsAsSpoken(snapshot) {
+        translatedSpeechState.spokenSegmentIds.clear();
+        (snapshot?.transcript || []).forEach((segment) => {
+          if (segment.translatedText) {
+            translatedSpeechState.spokenSegmentIds.add(segment.id);
+          }
+        });
+      }
+
+      function syncTranslatedSpeech(snapshot) {
+        const activeSessionId = snapshot?.activeSession?.id || null;
+        if (!activeSessionId) {
+          translatedSpeechState.sessionId = null;
+          translatedSpeechState.spokenSegmentIds.clear();
+          if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+          }
+          return;
+        }
+
+        if (translatedSpeechState.sessionId !== activeSessionId) {
+          translatedSpeechState.sessionId = activeSessionId;
+          translatedSpeechState.spokenSegmentIds.clear();
+        }
+
+        if (!translatedSpeechState.enabled || !window.speechSynthesis) {
+          return;
+        }
+
+        const pendingSegments = (snapshot?.transcript || [])
+          .filter((segment) => (
+            segment.sessionId === activeSessionId
+            && segment.isFinal
+            && segment.translatedText
+            && isVoiceEnabledForSegment(segment)
+            && !translatedSpeechState.spokenSegmentIds.has(segment.id)
+          ));
+
+        if (!pendingSegments.length) {
+          return;
+        }
+
+        pendingSegments.forEach((segment) => {
+          translatedSpeechState.spokenSegmentIds.add(segment.id);
+        });
+
+        window.speechSynthesis.cancel();
+        speakTranslatedSegment(pendingSegments[pendingSegments.length - 1]);
       }
 
       function readSidebarCollapsedPreference() {
@@ -2931,16 +3213,80 @@
                 </div>
               `)
               .join("")
-          : "<p class=\"muted\">No org context documents attached yet.</p>";
+          : state.orgDocumentsStatus === "unavailable"
+            ? "<p class=\"muted\">Org context documents are temporarily unavailable. Listen will retry automatically.</p>"
+            : "<p class=\"muted\">No org context documents attached yet.</p>";
 
         document.querySelectorAll("[data-delete-org-document]").forEach((button) => {
           button.addEventListener("click", async () => {
             await runUiAction("Deleting org document...", () => window.listenBridge.deleteOrgDocument(button.getAttribute("data-delete-org-document")));
-            state.orgDocuments = await window.listenBridge.listOrgDocuments();
-            renderOrgDocuments();
+            await refreshOrgDocuments();
           });
         });
       }
+
+      function scheduleOrgDocumentsRetry(delayMs = 3000) {
+        if (orgDocumentsRetryTimeoutId !== null) {
+          return;
+        }
+
+        orgDocumentsRetryTimeoutId = window.setTimeout(() => {
+          orgDocumentsRetryTimeoutId = null;
+          void refreshOrgDocuments({ preserveUnavailableStatus: false });
+        }, delayMs);
+      }
+
+      async function refreshOrgDocuments(options = {}) {
+        const { preserveUnavailableStatus = false } = options;
+        if (orgDocumentsRefreshPromise) {
+          return orgDocumentsRefreshPromise;
+        }
+
+        orgDocumentsRefreshPromise = (async () => {
+          try {
+            const documents = await window.listenBridge.listOrgDocuments();
+            state.orgDocuments = documents;
+            state.orgDocumentsStatus = "ready";
+            if (orgDocumentsRetryTimeoutId !== null) {
+              window.clearTimeout(orgDocumentsRetryTimeoutId);
+              orgDocumentsRetryTimeoutId = null;
+            }
+          } catch (error) {
+            if (!preserveUnavailableStatus || !state.orgDocuments.length) {
+              state.orgDocumentsStatus = "unavailable";
+            }
+            scheduleOrgDocumentsRetry();
+            throw error;
+          } finally {
+            renderOrgDocuments();
+            renderSetupStatus(state.snapshot);
+            orgDocumentsRefreshPromise = null;
+          }
+        })();
+
+        return orgDocumentsRefreshPromise;
+      }
+
+        function renderVoiceOptions(selectEl, selectedVoiceName) {
+          if (!selectEl) {
+            return;
+          }
+
+          const voices = (window.speechSynthesis?.getVoices?.() || [])
+            .slice()
+            .sort((left, right) => `${left.lang} ${left.name}`.localeCompare(`${right.lang} ${right.name}`));
+          const selectedValue = String(selectedVoiceName || "");
+          selectEl.innerHTML = [
+            '<option value="">Automatic voice</option>',
+            ...voices.map((voice) => `<option value="${escapeHtml(voice.name)}">${escapeHtml(`${voice.name} (${voice.lang || "unknown"})`)}</option>`),
+          ].join("");
+          selectEl.value = voices.some((voice) => voice.name === selectedValue) ? selectedValue : "";
+        }
+
+        function syncVoiceSelectors() {
+          renderVoiceOptions(translationHostVoiceNameEl, state.translationRuntimeSettings.hostVoiceName);
+          renderVoiceOptions(translationGuestVoiceNameEl, state.translationRuntimeSettings.guestVoiceName);
+        }
 
       function renderMeetingTemplates() {
         meetingTemplateListEl.innerHTML = state.meetingTemplates.length
@@ -2958,6 +3304,7 @@
                 </div>
               `)
               .join("")
+          syncVoiceSelectors();
           : '<p class="muted">No meeting templates saved yet.</p>';
 
         document.querySelectorAll("[data-apply-template-id]").forEach((button) => {
@@ -3135,6 +3482,26 @@
         return `${start.toLocaleDateString([], { month: "short", day: "numeric" })} ${start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} - ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
       }
 
+      function applyTranslationRuntimeSettings(settings) {
+        state.translationRuntimeSettings = {
+          enabled: settings.enabled === true,
+          hostLanguage: settings.hostLanguage || settings.sourceLanguage || "English",
+          guestLanguage: settings.guestLanguage || settings.targetLanguage || "Portuguese (Brazil)",
+          hostVoiceEnabled: settings.hostVoiceEnabled === true,
+          guestVoiceEnabled: settings.guestVoiceEnabled === true,
+          transcriptionFlushMs: Number(settings.transcriptionFlushMs) || 2500,
+          transcriptionFlushBytes: Number(settings.transcriptionFlushBytes) || 96000,
+        };
+
+        translationEnabledEl.checked = state.translationRuntimeSettings.enabled;
+        translationHostLanguageEl.value = state.translationRuntimeSettings.hostLanguage;
+        translationGuestLanguageEl.value = state.translationRuntimeSettings.guestLanguage;
+        translationHostVoiceEnabledEl.checked = state.translationRuntimeSettings.hostVoiceEnabled;
+        translationGuestVoiceEnabledEl.checked = state.translationRuntimeSettings.guestVoiceEnabled;
+        translationFlushMsEl.value = String(state.translationRuntimeSettings.transcriptionFlushMs);
+        translationFlushBytesEl.value = String(state.translationRuntimeSettings.transcriptionFlushBytes);
+      }
+
       function isRedundantMeetingHeadline(meetingTitle, headline) {
         const normalizedTitle = String(meetingTitle || "").trim().toLowerCase().replace(/\s+/g, " ");
         const normalizedHeadline = String(headline || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -3155,8 +3522,11 @@
       function renderSetupStatus(snapshot) {
         const connectedCalendars = snapshot.calendarConnections.filter((connection) => connection.provider !== "mock" && connection.connected).length;
         const hasOrgDocs = state.orgDocuments.length > 0;
+        const orgDocsUnavailable = state.orgDocumentsStatus === "unavailable";
         const hasTemplates = state.meetingTemplates.length > 0;
         const hasApiKeys = state.runtimeCapabilities.aiConfigured && state.runtimeCapabilities.cloudTranscriptionConfigured;
+        const translationConfigured = state.translationRuntimeSettings.enabled;
+        const displayedPreferences = getDisplayedTranslationPreferences();
         const apiKeyDetail = hasApiKeys
           ? "Both API keys are saved for this user."
           : state.runtimeCapabilities.cloudTranscriptionConfigured
@@ -3174,13 +3544,28 @@
             complete: hasApiKeys,
           },
           {
+            title: "Configure live translation",
+            detail: !translationConfigured
+              ? "Translation mode is off. Enable it and set host and guest languages for live interpretation."
+              : state.runtimeCapabilities.translationReady
+                ? snapshot.activeSession
+                  ? `Live session is currently using host ${displayedPreferences.host.language} and guest ${displayedPreferences.guest.language} preferences.`
+                  : `Host ${displayedPreferences.host.language} and guest ${displayedPreferences.guest.language} routing is configured for this machine.`
+                : "Translation is enabled, but it still needs AI and transcription keys to run reliably.",
+            complete: translationConfigured && state.runtimeCapabilities.translationReady,
+          },
+          {
             title: "Set coaching defaults",
             detail: state.coachingPreferences.guidance?.trim() ? "Personal guidance is saved." : "Add guidance so the coach has a default stance.",
             complete: Boolean(state.coachingPreferences.guidance?.trim()),
           },
           {
             title: "Load org context",
-            detail: hasOrgDocs ? `${state.orgDocuments.length} org documents available.` : "Attach docs, messaging, or notes for better prep and coaching.",
+            detail: orgDocsUnavailable
+              ? "Org context is temporarily unavailable. Listen will retry automatically."
+              : hasOrgDocs
+                ? `${state.orgDocuments.length} org documents available.`
+                : "Attach docs, messaging, or notes for better prep and coaching.",
             complete: hasOrgDocs,
           },
           {
@@ -3616,6 +4001,10 @@
           window.listenBridge.launchMeeting(meetingId, meetingContext)
         );
         state.meetingLaunchPrepOpen = false;
+        if (state.meetingModalOpen) {
+          state.meetingModalOpen = false;
+          syncMeetingModal();
+        }
         await render(snapshot);
         await ensureCaptureForSnapshot(snapshot);
       }
@@ -4899,6 +5288,7 @@
           endSessionButtonEl.hidden = false;
         }
 
+        const participantPreferences = getDisplayedTranslationPreferences();
         activeSessionEl.innerHTML = `
           <div class="stats-grid">
             <div class="stat-tile">
@@ -4917,12 +5307,41 @@
               <div class="stat-label">Stop Reason</div>
               <div class="stat-value">${snapshot.activeSession.stopReason ?? "pending"}</div>
             </div>
+            <div class="stat-tile">
+              <div class="stat-label">Host Audio</div>
+              <div class="stat-value">${escapeHtml(formatParticipantAudioPreference(participantPreferences.host))}</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Guest Audio</div>
+              <div class="stat-value">${escapeHtml(formatParticipantAudioPreference(participantPreferences.guest))}</div>
+            </div>
+          </div>
+          <div class="meeting-actions" style="margin-top: 12px; align-items: center;">
+            <label class="meta-line" style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input id="translated-speech-toggle" type="checkbox" ${translatedSpeechState.enabled ? "checked" : ""}>
+              Speak translated audio on this device
+            </label>
           </div>
         `;
+
+        const translatedSpeechToggleEl = document.getElementById("translated-speech-toggle");
+        translatedSpeechToggleEl?.addEventListener("change", () => {
+          translatedSpeechState.enabled = translatedSpeechToggleEl.checked;
+          writeTranslatedSpeechPreference(translatedSpeechState.enabled);
+
+          if (translatedSpeechState.enabled) {
+            markCurrentTranslatedSegmentsAsSpoken(snapshot);
+            return;
+          }
+
+          if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+          }
+        });
       }
 
       function renderCaptureHealth(snapshot) {
-        captureHealthEl.innerHTML = ["microphone", "system"]
+        const captureCards = ["microphone", "system"]
           .map((source) => {
             const health = snapshot.captureHealth[source];
             return `
@@ -4938,19 +5357,36 @@
             `;
           })
           .join("");
+        const translationHealth = snapshot.translationHealth || { status: "idle", detail: "Live translation is idle.", lastUpdatedAt: null };
+        const translationCard = `
+          <div class="health-card">
+            <div class="row-between">
+              <strong>translation</strong>
+              <span class="badge ${translationHealth.status === "active" ? "success" : translationHealth.status === "error" ? "warning" : "neutral"}">${translationHealth.status}</span>
+            </div>
+            <p class="body-copy">${escapeHtml(translationHealth.detail)}</p>
+            <div class="meta-line">Last update: ${translationHealth.lastUpdatedAt ? formatDate(translationHealth.lastUpdatedAt) : "none"}</div>
+          </div>
+        `;
+
+        captureHealthEl.innerHTML = `${captureCards}${translationCard}`;
       }
 
       function buildTranscriptMarkup(transcript) {
         const groupedSegments = (transcript || []).reduce((groups, segment) => {
           const speaker = segment.speakerLabel || segment.source;
           const previousGroup = groups[groups.length - 1];
+          const line = {
+            text: segment.text,
+            translatedText: segment.translatedText || "",
+          };
 
           if (previousGroup && previousGroup.speaker === speaker) {
-            previousGroup.lines.push(segment.text);
+            previousGroup.lines.push(line);
             return groups;
           }
 
-          groups.push({ speaker, lines: [segment.text] });
+          groups.push({ speaker, lines: [line] });
           return groups;
         }, []);
 
@@ -4960,7 +5396,12 @@
                 return `
                   <div class="transcript-item">
                     <div class="meta-line"><strong>${group.speaker}</strong></div>
-                    <p>${group.lines.join(" ")}</p>
+                    ${group.lines
+                      .map((line) => `
+                        <p>${line.text}</p>
+                        ${line.translatedText ? `<p class="meta-line">Portuguese: ${line.translatedText}</p>` : ""}
+                      `)
+                      .join("")}
                   </div>
                 `;
               })
@@ -5101,6 +5542,7 @@
         const detail = detailState?.detail;
         const summary = detail?.summary || selectedSession.summary;
         const context = detail?.context;
+        const participantPreferences = detail?.participantPreferences || selectedSession.participantPreferences;
         const showHeaderHeadline = !isRedundantMeetingHeadline(selectedSession.meetingTitle, summary?.headline);
         const sessionMetaMarkup = `
           <div class="page-chip-row">
@@ -5147,6 +5589,14 @@
             <div class="stat-tile">
               <div class="stat-label">Meeting Goal</div>
               <div class="stat-value">${escapeHtml(context?.callGoal || context?.desiredOutcome || "No saved goal")}</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Host Audio</div>
+              <div class="stat-value">${escapeHtml(formatParticipantAudioPreference(participantPreferences?.host))}</div>
+            </div>
+            <div class="stat-tile">
+              <div class="stat-label">Guest Audio</div>
+              <div class="stat-value">${escapeHtml(formatParticipantAudioPreference(participantPreferences?.guest))}</div>
             </div>
           </div>
           <div class="review-summary-grid">
@@ -5220,8 +5670,13 @@
         const { mode = "review", domKey = null } = options;
         const panelKey = mode === "active" ? "active" : mode === "prep" ? "prep" : "review";
         const elementKey = domKey || panelKey;
+        const questionElementId = `session-question-${elementKey}`;
         const qaState = state.sessionQa[panelKey];
         const selectedReviewSession = getSelectedReviewSession();
+        const activeElement = document.activeElement;
+        const hadQuestionFocus = activeElement?.id === questionElementId;
+        const selectionStart = hadQuestionFocus && typeof activeElement.selectionStart === "number" ? activeElement.selectionStart : null;
+        const selectionEnd = hadQuestionFocus && typeof activeElement.selectionEnd === "number" ? activeElement.selectionEnd : null;
         const hasContext = panelKey === "active"
           ? Boolean(snapshot.activeSession)
           : panelKey === "prep"
@@ -5295,7 +5750,7 @@
             </div>
           </div>
           <div class="composer">
-            <textarea id="session-question-${elementKey}" rows="${panelKey === "active" ? "2" : "3"}" placeholder="${panelKey === "active" ? "Ask about the call" : panelKey === "prep" ? "What do we already know? What risk should I prepare for? What should I ask next?" : "What objection came up? What mattered most to the guest? What follow-up should I send?"}"></textarea>
+            <textarea id="${questionElementId}" rows="${panelKey === "active" ? "2" : "3"}" placeholder="${panelKey === "active" ? "Ask about the call" : panelKey === "prep" ? "What do we already know? What risk should I prepare for? What should I ask next?" : "What objection came up? What mattered most to the guest? What follow-up should I send?"}"></textarea>
           </div>
           <div class="meeting-actions">
             <button id="ask-session-question-${elementKey}" class="secondary" ${!hasContext || qaState.pending ? "disabled" : ""}>${qaState.pending ? "Asking..." : "Ask"}</button>
@@ -5303,7 +5758,7 @@
         `;
 
         const askButton = document.getElementById(`ask-session-question-${elementKey}`);
-        const questionEl = document.getElementById(`session-question-${elementKey}`);
+        const questionEl = document.getElementById(questionElementId);
         const threadEl = document.getElementById(`session-qa-thread-${elementKey}`);
         if (threadEl) {
           threadEl.scrollTop = threadEl.scrollHeight;
@@ -5313,6 +5768,15 @@
           questionEl.addEventListener("input", () => {
             qaState.pendingQuestion = questionEl.value;
           });
+          if (hadQuestionFocus && !qaState.pending) {
+            questionEl.focus({ preventScroll: true });
+            if (selectionStart !== null && selectionEnd !== null) {
+              questionEl.setSelectionRange(
+                Math.min(selectionStart, questionEl.value.length),
+                Math.min(selectionEnd, questionEl.value.length),
+              );
+            }
+          }
         }
         askButton?.addEventListener("click", async () => {
           const question = questionEl.value.trim();
@@ -5397,6 +5861,7 @@
         renderActiveSession(snapshot);
         renderCaptureHealth(snapshot);
         renderTranscript(snapshot);
+        syncTranslatedSpeech(snapshot);
         renderCoaching(snapshot);
         renderReviewWorkspace(snapshot);
         renderSessionQa(snapshot);
@@ -5439,6 +5904,27 @@
         applyRuntimeSecrets(secrets);
         state.runtimeCapabilities = await window.listenBridge.getRuntimeCapabilities();
         renderSetupStatus(state.snapshot);
+      });
+      saveTranslationSettingsButtonEl.addEventListener("click", async () => {
+        const settings = await runUiAction("Saving translation settings...", () =>
+          window.listenBridge.saveTranslationRuntimeSettings({
+            enabled: translationEnabledEl.checked,
+            hostLanguage: translationHostLanguageEl.value,
+            guestLanguage: translationGuestLanguageEl.value,
+            hostVoiceEnabled: translationHostVoiceEnabledEl.checked,
+            guestVoiceEnabled: translationGuestVoiceEnabledEl.checked,
+            hostVoiceName: translationHostVoiceNameEl.value,
+            guestVoiceName: translationGuestVoiceNameEl.value,
+            transcriptionFlushMs: Number(translationFlushMsEl.value),
+            transcriptionFlushBytes: Number(translationFlushBytesEl.value),
+          })
+        );
+        applyTranslationRuntimeSettings(settings);
+        state.runtimeCapabilities = await window.listenBridge.getRuntimeCapabilities();
+        renderSetupStatus(state.snapshot);
+      });
+      window.speechSynthesis?.addEventListener?.("voiceschanged", () => {
+        syncVoiceSelectors();
       });
       checkForUpdatesButtonEl.addEventListener("click", async () => {
         if (state.updater.availability === "downloaded") {
@@ -5499,8 +5985,7 @@
             mimeType: selectedFile?.type || null,
           })
         );
-        state.orgDocuments = await window.listenBridge.listOrgDocuments();
-        renderOrgDocuments();
+        await refreshOrgDocuments();
         orgDocumentTitleEl.value = "";
         orgDocumentLinkEl.value = "";
         orgDocumentContentEl.value = "";
@@ -5600,6 +6085,11 @@
       briefCallFunctionEl.addEventListener("change", syncCallTypeOptions);
 
       window.listenBridge.onStateUpdate((snapshot) => {
+        if (state.orgDocumentsStatus === "unavailable") {
+          void refreshOrgDocuments({ preserveUnavailableStatus: true }).catch(() => {
+            // Keep the UI stable until the next retry succeeds.
+          });
+        }
         void render(snapshot);
       });
       window.listenBridge.onUpdaterState((updaterState) => {
@@ -5615,6 +6105,7 @@
       Promise.allSettled([
         window.listenBridge.getRuntimeCapabilities(),
         window.listenBridge.getRuntimeSecrets(),
+        window.listenBridge.getTranslationRuntimeSettings(),
         window.listenBridge.getUpdaterState(),
         window.listenBridge.getSnapshot(),
         window.listenBridge.getCoachingPreferences(),
@@ -5622,13 +6113,16 @@
         window.listenBridge.listMeetingTemplates(),
       ])
         .then((results) => {
-          const [runtimeCapabilitiesResult, runtimeSecretsResult, updaterStateResult, snapshotResult, coachingPreferencesResult, orgDocumentsResult, meetingTemplatesResult] = results;
+          const [runtimeCapabilitiesResult, runtimeSecretsResult, translationSettingsResult, updaterStateResult, snapshotResult, coachingPreferencesResult, orgDocumentsResult, meetingTemplatesResult] = results;
 
           if (runtimeCapabilitiesResult.status === "fulfilled") {
             state.runtimeCapabilities = runtimeCapabilitiesResult.value;
           }
           if (runtimeSecretsResult.status === "fulfilled") {
             applyRuntimeSecrets(runtimeSecretsResult.value);
+          }
+          if (translationSettingsResult.status === "fulfilled") {
+            applyTranslationRuntimeSettings(translationSettingsResult.value);
           }
           if (updaterStateResult.status === "fulfilled") {
             state.updater = updaterStateResult.value;
@@ -5638,6 +6132,10 @@
           }
           if (orgDocumentsResult.status === "fulfilled") {
             state.orgDocuments = orgDocumentsResult.value;
+            state.orgDocumentsStatus = "ready";
+          } else {
+            state.orgDocumentsStatus = "unavailable";
+            scheduleOrgDocumentsRetry();
           }
           if (meetingTemplatesResult.status === "fulfilled") {
             state.meetingTemplates = meetingTemplatesResult.value;

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
-import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
+import type { AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, Notification, session, shell, Tray, utilityProcess } from "electron";
 import type { MessageBoxOptions } from "electron";
 import dotenv from "dotenv";
@@ -15,7 +15,7 @@ import { CalendarSyncClient } from "./calendar/calendarSyncClient";
 import { RealtimeClient } from "./realtime/realtimeClient";
 import { MeetingScheduler } from "./scheduler/meetingScheduler";
 import { AutoStopController } from "./session/autoStopController";
-import { SessionStore, type DesktopCloseBehavior, type StoredMeetingLaunchContext, type StoredRuntimeSecrets } from "./storage/sessionStore";
+import { SessionStore, type DesktopCloseBehavior, type StoredMeetingLaunchContext, type StoredRuntimeSecrets, type StoredTranslationRuntimeSettings } from "./storage/sessionStore";
 import { fetchWithTimeout } from "./http/fetchWithTimeout";
 
 type ContextQuestionDocument = {
@@ -111,6 +111,76 @@ function getEnvRuntimeSecrets(): StoredRuntimeSecrets {
   };
 }
 
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+  const parsed = typeof value === "number" && Number.isFinite(value)
+    ? value
+    : typeof value === "string"
+      ? Number(value.trim())
+      : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function getEnvTranslationRuntimeSettings(): StoredTranslationRuntimeSettings {
+  return {
+    enabled: process.env.LISTEN_TRANSLATION_ENABLED === "true",
+    hostLanguage: process.env.LISTEN_TRANSLATION_SOURCE_LANGUAGE?.trim() || "English",
+    guestLanguage: process.env.LISTEN_TRANSLATION_TARGET_LANGUAGE?.trim() || "Portuguese (Brazil)",
+    hostVoiceEnabled: false,
+    guestVoiceEnabled: false,
+    hostVoiceName: "",
+    guestVoiceName: "",
+    transcriptionFlushMs: normalizePositiveInteger(process.env.LISTEN_TRANSCRIPTION_FLUSH_MS, 2500),
+    transcriptionFlushBytes: normalizePositiveInteger(process.env.LISTEN_TRANSCRIPTION_FLUSH_BYTES, 96000),
+  };
+}
+
+function normalizeStoredTranslationRuntimeSettings(
+  value: Partial<StoredTranslationRuntimeSettings> | null | undefined,
+  fallback: StoredTranslationRuntimeSettings = getEnvTranslationRuntimeSettings(),
+): StoredTranslationRuntimeSettings {
+  return {
+    enabled: value?.enabled === true,
+    hostLanguage: typeof (value as { hostLanguage?: unknown; sourceLanguage?: unknown })?.hostLanguage === "string"
+      && String((value as { hostLanguage?: unknown }).hostLanguage).trim()
+      ? String((value as { hostLanguage: string }).hostLanguage).trim()
+      : typeof (value as { sourceLanguage?: unknown })?.sourceLanguage === "string" && String((value as { sourceLanguage: string }).sourceLanguage).trim()
+        ? String((value as { sourceLanguage: string }).sourceLanguage).trim()
+        : fallback.hostLanguage,
+    guestLanguage: typeof (value as { guestLanguage?: unknown; targetLanguage?: unknown })?.guestLanguage === "string"
+      && String((value as { guestLanguage?: unknown }).guestLanguage).trim()
+      ? String((value as { guestLanguage: string }).guestLanguage).trim()
+      : typeof (value as { targetLanguage?: unknown })?.targetLanguage === "string" && String((value as { targetLanguage: string }).targetLanguage).trim()
+        ? String((value as { targetLanguage: string }).targetLanguage).trim()
+        : fallback.guestLanguage,
+    hostVoiceEnabled: (value as { hostVoiceEnabled?: unknown } | null | undefined)?.hostVoiceEnabled === true,
+    guestVoiceEnabled: (value as { guestVoiceEnabled?: unknown } | null | undefined)?.guestVoiceEnabled === true,
+    hostVoiceName: typeof (value as { hostVoiceName?: unknown })?.hostVoiceName === "string"
+      ? String((value as { hostVoiceName: string }).hostVoiceName).trim()
+      : fallback.hostVoiceName,
+    guestVoiceName: typeof (value as { guestVoiceName?: unknown })?.guestVoiceName === "string"
+      ? String((value as { guestVoiceName: string }).guestVoiceName).trim()
+      : fallback.guestVoiceName,
+    transcriptionFlushMs: normalizePositiveInteger(value?.transcriptionFlushMs, fallback.transcriptionFlushMs),
+    transcriptionFlushBytes: normalizePositiveInteger(value?.transcriptionFlushBytes, fallback.transcriptionFlushBytes),
+  };
+}
+
+function getSessionParticipantTranslationPreferences(): SessionParticipantTranslationPreferences {
+  const settings = getEffectiveTranslationRuntimeSettings();
+  return {
+    host: {
+      language: settings.hostLanguage,
+      voiceEnabled: settings.hostVoiceEnabled,
+      voiceName: settings.hostVoiceName || null,
+    },
+    guest: {
+      language: settings.guestLanguage,
+      voiceEnabled: settings.guestVoiceEnabled,
+      voiceName: settings.guestVoiceName || null,
+    },
+  };
+}
+
 const popupLeadMinutes = Number(process.env.LISTEN_MEETING_POPUP_LEAD_MINUTES ?? 2);
 const realtimeHttpUrl = resolveRealtimeHttpUrl();
 const realtimeUrl = resolveRealtimeWsUrl(realtimeHttpUrl);
@@ -135,17 +205,20 @@ let calendarService: CalendarService;
 let realtimeClient: RealtimeClient | null = null;
 let activeMeetingRecord: MeetingRecord | null = null;
 let activeMeetingContext: MeetingContext | null = null;
+let activeSessionParticipantPreferences: SessionParticipantTranslationPreferences | null = null;
 let pendingStopTimeout: NodeJS.Timeout | null = null;
 let updaterConfigured = false;
 let tray: Tray | null = null;
 let isQuitting = false;
 let desktopCloseBehavior: DesktopCloseBehavior = "ask";
 let desktopRuntimeSecrets: StoredRuntimeSecrets = { aiApiKey: "", transcriptionApiKey: "" };
+let desktopTranslationRuntimeSettings: StoredTranslationRuntimeSettings = getEnvTranslationRuntimeSettings();
 let updaterCheckStartedAt: number | null = null;
 let pendingUpdaterStatePatch: Partial<DesktopUpdaterState> | null = null;
 let pendingUpdaterStateTimeout: NodeJS.Timeout | null = null;
 let embeddedRealtimeModuleLoad: Promise<void> | null = null;
 let embeddedRealtimeProcess: Electron.UtilityProcess | null = null;
+let pendingRealtimeRecovery: Promise<void> | null = null;
 
 const minimumUpdaterCheckingDurationMs = 1000;
 const embeddedRealtimeStartupTimeoutMs = 15_000;
@@ -320,10 +393,6 @@ async function ensureRealtimeServiceAvailable(databasePath: string): Promise<voi
     return;
   }
 
-  if (!app.isPackaged) {
-    return;
-  }
-
   if (embeddedRealtimeModuleLoad) {
     await embeddedRealtimeModuleLoad;
     await waitForRealtimeServiceReady();
@@ -332,7 +401,7 @@ async function ensureRealtimeServiceAvailable(databasePath: string): Promise<voi
 
   const bundledEntry = resolveBundledRealtimeEntry();
   if (!bundledEntry) {
-    console.warn("Bundled realtime service entry was not found in packaged desktop resources.");
+    console.warn("Bundled realtime service entry was not found in desktop resources.");
     return;
   }
 
@@ -390,7 +459,13 @@ const snapshot: AppSnapshot = {
   upcomingMeetings: [],
   pendingPopupMeeting: null,
   activeSession: null,
+  participantPreferences: null,
   captureHealth: createInitialCaptureHealth(),
+  translationHealth: {
+    status: "idle",
+    detail: "Live translation is idle.",
+    lastUpdatedAt: null,
+  },
   transcript: [],
   coaching: [],
   lastSummary: null,
@@ -472,6 +547,22 @@ function resetCaptureHealth(): void {
   snapshot.captureHealth = createInitialCaptureHealth();
 }
 
+function resetTranslationHealth(): void {
+  snapshot.translationHealth = {
+    status: "idle",
+    detail: "Live translation is idle.",
+    lastUpdatedAt: null,
+  };
+}
+
+function updateTranslationHealth(status: "idle" | "starting" | "active" | "error", detail: string): void {
+  snapshot.translationHealth = {
+    status,
+    detail,
+    lastUpdatedAt: new Date().toISOString(),
+  };
+}
+
 function updateCaptureHealth(source: AudioSourceKind, status: "idle" | "starting" | "active" | "error", detail: string): void {
   snapshot.captureHealth = {
     ...snapshot.captureHealth,
@@ -544,7 +635,9 @@ function configureSessionPermissions(): void {
       ? sources.find((source) => source.id === preferredMeetingSourceId)
       : null;
     const fallbackSource = sources.find((source) => source.id.startsWith("screen:")) ?? sources[0];
-    const selectedSource = preferredSource ?? fallbackSource;
+    const selectedSource = process.platform === "win32"
+      ? fallbackSource
+      : preferredSource ?? fallbackSource;
 
     if (!selectedSource) {
       callback({});
@@ -1019,16 +1112,33 @@ function getEffectiveDesktopRuntimeSecrets(): StoredRuntimeSecrets {
   };
 }
 
-function getRuntimeCapabilitiesSnapshot(): { aiConfigured: boolean; cloudTranscriptionConfigured: boolean } {
+function getEffectiveTranslationRuntimeSettings(): StoredTranslationRuntimeSettings {
+  return normalizeStoredTranslationRuntimeSettings(desktopTranslationRuntimeSettings, getEnvTranslationRuntimeSettings());
+}
+
+function getRuntimeCapabilitiesSnapshot(): {
+  aiConfigured: boolean;
+  cloudTranscriptionConfigured: boolean;
+  translationEnabled: boolean;
+  translationReady: boolean;
+} {
   const secrets = getEffectiveDesktopRuntimeSecrets();
+  const translationSettings = getEffectiveTranslationRuntimeSettings();
   return {
     aiConfigured: Boolean(secrets.aiApiKey),
     cloudTranscriptionConfigured: Boolean(secrets.transcriptionApiKey),
+    translationEnabled: translationSettings.enabled,
+    translationReady: translationSettings.enabled && Boolean(secrets.aiApiKey) && Boolean(secrets.transcriptionApiKey),
   };
 }
 
 async function readDesktopRuntimeSecrets(): Promise<StoredRuntimeSecrets> {
   return normalizeStoredRuntimeSecrets(await sessionStore.readRuntimeSecrets());
+}
+
+async function readDesktopTranslationRuntimeSettings(): Promise<StoredTranslationRuntimeSettings> {
+  const stored = await sessionStore.readTranslationRuntimeSettings();
+  return normalizeStoredTranslationRuntimeSettings(stored, getEnvTranslationRuntimeSettings());
 }
 
 async function syncDesktopRuntimeSecretsToRealtime(): Promise<void> {
@@ -1050,6 +1160,22 @@ async function syncDesktopRuntimeSecretsToRealtime(): Promise<void> {
   }
 }
 
+async function syncDesktopTranslationSettingsToRealtime(): Promise<void> {
+  const settings = getEffectiveTranslationRuntimeSettings();
+  const response = await fetchWithTimeout(`${realtimeHttpUrl}/api/runtime/translation-settings`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(settings),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to sync translation settings: ${response.status} ${body}`.trim());
+  }
+}
+
 async function saveDesktopRuntimeSecrets(value: StoredRuntimeSecrets): Promise<StoredRuntimeSecrets> {
   const normalized = normalizeStoredRuntimeSecrets(value);
   await sessionStore.writeRuntimeSecrets(normalized);
@@ -1059,6 +1185,20 @@ async function saveDesktopRuntimeSecrets(value: StoredRuntimeSecrets): Promise<S
     await syncDesktopRuntimeSecretsToRealtime();
   } catch (error) {
     console.warn("Saved runtime secrets locally, but failed to sync them to realtime.", error);
+  }
+
+  return normalized;
+}
+
+async function saveDesktopTranslationRuntimeSettings(value: StoredTranslationRuntimeSettings): Promise<StoredTranslationRuntimeSettings> {
+  const normalized = normalizeStoredTranslationRuntimeSettings(value, getEnvTranslationRuntimeSettings());
+  await sessionStore.writeTranslationRuntimeSettings(normalized);
+  desktopTranslationRuntimeSettings = normalized;
+
+  try {
+    await syncDesktopTranslationSettingsToRealtime();
+  } catch (error) {
+    console.warn("Saved translation settings locally, but failed to sync them to realtime.", error);
   }
 
   return normalized;
@@ -1295,6 +1435,9 @@ async function sendRealtimeSessionStart(meeting: MeetingRecord, meetingContext: 
 
   const client = attachRealtimeClient();
   await client.connect();
+  const participantPreferences = getSessionParticipantTranslationPreferences();
+  activeSessionParticipantPreferences = participantPreferences;
+  snapshot.participantPreferences = participantPreferences;
   const sent = client.send({
     kind: "session_start",
     sessionId: snapshot.activeSession.id,
@@ -1304,6 +1447,7 @@ async function sendRealtimeSessionStart(meeting: MeetingRecord, meetingContext: 
     meetingProvider: meeting.provider,
     calendarProvider: meeting.calendarProvider,
     meetingContext,
+    participantPreferences,
     attendees: (meeting.attendees ?? [])
       .filter((attendee) => attendee.fullName.trim().length > 0)
       .map((attendee) => ({
@@ -1335,7 +1479,24 @@ async function ensureRealtimeLiveSessionAvailable(): Promise<void> {
     // Fall through and attempt to rehydrate the live session over websocket.
   }
 
+  const client = attachRealtimeClient();
+  if (!client.isConnected()) {
+    await client.connect();
+  }
+
   await sendRealtimeSessionStart(activeMeetingRecord, activeMeetingContext);
+}
+
+async function recoverRealtimeLiveSession(): Promise<void> {
+  if (pendingRealtimeRecovery) {
+    return pendingRealtimeRecovery;
+  }
+
+  pendingRealtimeRecovery = ensureRealtimeLiveSessionAvailable().finally(() => {
+    pendingRealtimeRecovery = null;
+  });
+
+  return pendingRealtimeRecovery;
 }
 
 async function askDesktopSessionQuestion(question: string, sessionId?: string | null): Promise<SessionQuestionAnswer> {
@@ -2040,7 +2201,9 @@ async function finalizeSessionLocally(reason: SessionStopReason): Promise<AppSna
 
   snapshot.lastSummary = summary;
   snapshot.activeSession = null;
+  snapshot.participantPreferences = null;
   resetCaptureHealth();
+  resetTranslationHealth();
   snapshot.transcript = [];
   snapshot.coaching = [];
   autoStopController.disarm();
@@ -2056,6 +2219,7 @@ async function finalizeSessionLocally(reason: SessionStopReason): Promise<AppSna
       transcript: completedTranscript,
       coaching: completedCoaching,
       context: completedContext,
+      participantPreferences: activeSessionParticipantPreferences,
     });
   }
   if (completedMeeting?.calendarProvider === "mock" && !completedMeeting.joinUrl) {
@@ -2064,6 +2228,7 @@ async function finalizeSessionLocally(reason: SessionStopReason): Promise<AppSna
   }
   activeMeetingRecord = null;
   activeMeetingContext = null;
+  activeSessionParticipantPreferences = null;
   realtimeClient?.dispose();
   realtimeClient = null;
   return broadcastSnapshot();
@@ -2089,6 +2254,37 @@ function attachRealtimeClient(): RealtimeClient {
           createdAt: event.createdAt,
         },
       ];
+      broadcastSnapshot();
+      return;
+    }
+
+    if (event.kind === "translated_segment") {
+      snapshot.transcript = snapshot.transcript.map((segment) => (
+        segment.id === event.segmentId
+          ? {
+              ...segment,
+              translatedText: event.translatedText,
+              translatedLanguage: event.translatedLanguage,
+            }
+          : segment
+      ));
+      broadcastSnapshot();
+      return;
+    }
+
+    if (event.kind === "translation_status") {
+      updateTranslationHealth(event.status, event.detail);
+      broadcastSnapshot();
+      return;
+    }
+
+    if (event.kind === "participant_preferences_updated") {
+      activeSessionParticipantPreferences = event.participantPreferences;
+      snapshot.participantPreferences = event.participantPreferences;
+      updateTranslationHealth(
+        "active",
+        `Live session preferences updated: host ${event.participantPreferences.host.language}, guest ${event.participantPreferences.guest.language}.`,
+      );
       broadcastSnapshot();
       return;
     }
@@ -2211,8 +2407,19 @@ async function startSession(
   const { openMeetingWindow = true } = options;
   snapshot.pendingPopupMeeting = null;
   resetCaptureHealth();
+  resetTranslationHealth();
   updateCaptureHealth("microphone", "starting", "Waiting for microphone permission.");
   updateCaptureHealth("system", "starting", "Waiting for system-audio permission.");
+  if (getRuntimeCapabilitiesSnapshot().translationEnabled) {
+    const capabilities = getRuntimeCapabilitiesSnapshot();
+    const translationSettings = getEffectiveTranslationRuntimeSettings();
+    updateTranslationHealth(
+      capabilities.translationReady ? "starting" : "error",
+      capabilities.translationReady
+        ? `Preparing host ${translationSettings.hostLanguage} and guest ${translationSettings.guestLanguage} language routing.`
+        : "Translation is enabled, but AI or transcription keys are missing.",
+    );
+  }
   snapshot.transcript = [];
   snapshot.coaching = [];
   snapshot.lastSummary = null;
@@ -2259,6 +2466,19 @@ async function startSession(
     await sendRealtimeSessionStart(meeting, meetingContext);
   } catch (error) {
     console.error("Failed to connect to realtime service", error);
+    snapshot.coaching = [
+      ...snapshot.coaching,
+      {
+        id: randomUUID(),
+        sessionId: snapshot.activeSession.id,
+        severity: "warning",
+        title: "Live transcription connection failed",
+        message: "Listen could not register this live session with the realtime service. Audio capture may run, but transcript segments will be missing until the connection is restored.",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    updateCaptureHealth("microphone", "error", "Realtime session registration failed.");
+    updateCaptureHealth("system", "error", "Realtime session registration failed.");
   }
 
   autoStopController.arm(snapshot.activeSession.id, meeting.endsAt);
@@ -2302,6 +2522,11 @@ function registerHandlers(): void {
   ipcMain.handle("app:get-runtime-capabilities", async () => getRuntimeCapabilitiesSnapshot());
   ipcMain.handle("runtime-secrets:get", async () => readDesktopRuntimeSecrets());
   ipcMain.handle("runtime-secrets:save", async (_event, secrets: StoredRuntimeSecrets) => saveDesktopRuntimeSecrets(secrets));
+  ipcMain.handle("translation-settings:get", async () => readDesktopTranslationRuntimeSettings());
+  ipcMain.handle(
+    "translation-settings:save",
+    async (_event, settings: StoredTranslationRuntimeSettings) => saveDesktopTranslationRuntimeSettings(settings),
+  );
   ipcMain.handle("updater:get-state", async () => updaterState);
   ipcMain.handle("updater:check", async () => checkForDesktopUpdates());
   ipcMain.handle("updater:install", async () => installDownloadedUpdate());
@@ -2391,22 +2616,36 @@ function registerHandlers(): void {
       return;
     }
 
-    const sent = realtimeClient?.send({
-      kind: "audio_chunk",
-      sessionId: snapshot.activeSession.id,
-      source,
-      sampleRate,
-      payloadBase64,
-      createdAt: new Date().toISOString(),
-    });
-    if (!sent) {
-      console.warn(`Dropped ${source} audio chunk because realtime socket is unavailable.`);
-    }
     autoStopController.noteAudioActivity();
     noteCaptureChunk(source);
     if (snapshot.captureHealth[source].chunkCount % 10 === 9) {
       broadcastSnapshot();
     }
+
+    const outboundEvent = {
+      kind: "audio_chunk" as const,
+      sessionId: snapshot.activeSession.id,
+      source,
+      sampleRate,
+      payloadBase64,
+      createdAt: new Date().toISOString(),
+    };
+
+    void (async () => {
+      let sent = realtimeClient?.send(outboundEvent) ?? false;
+      if (!sent) {
+        try {
+          await recoverRealtimeLiveSession();
+          sent = realtimeClient?.send(outboundEvent) ?? false;
+        } catch (error) {
+          console.error("Failed to restore realtime live session.", error);
+        }
+      }
+
+      if (!sent) {
+        console.warn(`Dropped ${source} audio chunk because realtime socket is unavailable.`);
+      }
+    })();
   });
   ipcMain.handle("audio:activity", async (_event, source: AudioSourceKind, level: number) => {
     if (snapshot.activeSession && level > 0.01) {
@@ -2509,11 +2748,18 @@ app.whenReady().then(async () => {
   snapshot.lastSummary = persisted.lastSummary;
   desktopCloseBehavior = await sessionStore.readDesktopCloseBehavior();
   desktopRuntimeSecrets = await sessionStore.readRuntimeSecrets();
+  desktopTranslationRuntimeSettings = await readDesktopTranslationRuntimeSettings();
 
   try {
     await syncDesktopRuntimeSecretsToRealtime();
   } catch (error) {
     console.warn("Failed to sync runtime secrets during desktop startup.", error);
+  }
+
+  try {
+    await syncDesktopTranslationSettingsToRealtime();
+  } catch (error) {
+    console.warn("Failed to sync translation settings during desktop startup.", error);
   }
 
   registerHandlers();

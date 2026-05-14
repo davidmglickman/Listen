@@ -15,6 +15,34 @@ interface AiResearchResponse {
   references?: string[];
 }
 
+interface DerivedResearchHints {
+  companyName: string | null;
+  companyDomain: string | null;
+  organizationName: string | null;
+  organizationDomain: string | null;
+  companyWebsiteUrl: string | null;
+  organizationWebsiteUrl: string | null;
+  personLinkedInSearchUrl: string | null;
+  organizationLinkedInSearchUrl: string | null;
+  domainSource: "attendee" | "email" | "organization" | "none";
+}
+
+const PERSONAL_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "icloud.com",
+  "hotmail.com",
+  "outlook.com",
+  "live.com",
+  "msn.com",
+  "yahoo.com",
+  "me.com",
+  "aol.com",
+  "proton.me",
+  "protonmail.com",
+  "pm.me",
+]);
+
 function pushIfValue(items: string[], value: string | null | undefined): void {
   if (value && value.trim()) {
     items.push(value.trim());
@@ -34,32 +62,158 @@ function normalizeUsefulOrganizationName(value: string | null | undefined): stri
   return trimmed;
 }
 
+function normalizeDomain(value: string | null | undefined): string | null {
+  const trimmed = value?.trim().toLowerCase() || "";
+  if (!trimmed) {
+    return null;
+  }
+
+  const withoutProtocol = trimmed.replace(/^https?:\/\//, "");
+  const normalized = withoutProtocol.replace(/^www\./, "").replace(/\/.*/, "");
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function extractDomainFromEmail(email: string | null | undefined): string | null {
+  const trimmed = email?.trim().toLowerCase() || "";
+  const match = trimmed.match(/^[^@\s]+@([^@\s]+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const domain = normalizeDomain(match[1]);
+  if (!domain || PERSONAL_EMAIL_DOMAINS.has(domain)) {
+    return null;
+  }
+
+  return domain;
+}
+
+function titleCaseWord(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+function inferOrganizationNameFromDomain(domain: string | null): string | null {
+  if (!domain) {
+    return null;
+  }
+
+  const rootLabel = domain.split(".")[0] || "";
+  if (!rootLabel) {
+    return null;
+  }
+
+  const tokens = rootLabel.split(/[-_]+/).filter(Boolean);
+  if (!tokens.length) {
+    return null;
+  }
+
+  return tokens.map(titleCaseWord).join(" ");
+}
+
+function buildWebsiteUrl(domain: string | null): string | null {
+  return domain ? `https://${domain}` : null;
+}
+
+function buildLinkedInSearchUrl(terms: Array<string | null | undefined>): string | null {
+  const query = terms
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  if (!query) {
+    return null;
+  }
+
+  return `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(query)}`;
+}
+
+function deriveResearchHints(job: ResearchJobWorkItem): DerivedResearchHints {
+  const companyName = normalizeUsefulOrganizationName(job.companyName);
+  const organizationName = normalizeUsefulOrganizationName(job.organizationName);
+  const attendeeDomain = normalizeDomain(job.companyDomain);
+  const organizationDomain = normalizeDomain(job.organizationDomain);
+  const emailDomain = extractDomainFromEmail(job.personEmail);
+  const effectiveCompanyDomain = attendeeDomain ?? emailDomain;
+  const effectiveOrganizationDomain = organizationDomain ?? effectiveCompanyDomain;
+  const effectiveCompanyName = companyName ?? inferOrganizationNameFromDomain(effectiveCompanyDomain);
+  const effectiveOrganizationName = organizationName ?? inferOrganizationNameFromDomain(effectiveOrganizationDomain);
+
+  return {
+    companyName: effectiveCompanyName,
+    companyDomain: effectiveCompanyDomain,
+    organizationName: effectiveOrganizationName,
+    organizationDomain: effectiveOrganizationDomain,
+    companyWebsiteUrl: buildWebsiteUrl(effectiveCompanyDomain),
+    organizationWebsiteUrl: buildWebsiteUrl(effectiveOrganizationDomain),
+    personLinkedInSearchUrl: buildLinkedInSearchUrl([
+      job.personFullName,
+      effectiveCompanyName,
+      effectiveCompanyDomain,
+    ]),
+    organizationLinkedInSearchUrl: buildLinkedInSearchUrl([
+      effectiveOrganizationName,
+      effectiveOrganizationDomain,
+    ]),
+    domainSource: attendeeDomain ? "attendee" : emailDomain ? "email" : organizationDomain ? "organization" : "none",
+  };
+}
+
 export class ManualResearchProvider implements ResearchProvider {
   async enrich(job: ResearchJobWorkItem): Promise<ResearchSnapshot> {
-    const companyName = normalizeUsefulOrganizationName(job.companyName);
-    const organizationName = normalizeUsefulOrganizationName(job.organizationName);
+    const hints = deriveResearchHints(job);
     const sourceLinks: string[] = [];
     pushIfValue(sourceLinks, job.personLinkedInUrl);
     pushIfValue(sourceLinks, job.organizationLinkedInUrl);
+    pushIfValue(sourceLinks, hints.companyWebsiteUrl);
+    pushIfValue(sourceLinks, hints.organizationWebsiteUrl);
+    if (!job.personLinkedInUrl) {
+      pushIfValue(sourceLinks, hints.personLinkedInSearchUrl);
+    }
+    if (!job.organizationLinkedInUrl) {
+      pushIfValue(sourceLinks, hints.organizationLinkedInSearchUrl);
+    }
 
     const personSummaryParts: string[] = [];
     pushIfValue(personSummaryParts, job.personFullName);
     pushIfValue(personSummaryParts, job.personTitle ? `${job.personTitle} role detected.` : null);
     pushIfValue(personSummaryParts, job.personEmail ? `Reachable at ${job.personEmail}.` : null);
-    pushIfValue(personSummaryParts, companyName ? `Associated with ${companyName}.` : null);
-    pushIfValue(personSummaryParts, job.companyDomain ? `Observed company domain: ${job.companyDomain}.` : null);
+    pushIfValue(personSummaryParts, hints.companyName ? `Likely associated with ${hints.companyName}.` : null);
+    pushIfValue(
+      personSummaryParts,
+      hints.companyDomain
+        ? hints.domainSource === "email"
+          ? `Work email domain suggests company context at ${hints.companyDomain}.`
+          : `Observed company domain: ${hints.companyDomain}.`
+        : null,
+    );
+    pushIfValue(personSummaryParts, !job.personLinkedInUrl && hints.personLinkedInSearchUrl ? "LinkedIn search link prepared for quick profile lookup." : null);
 
     const organizationSummaryParts: string[] = [];
-    pushIfValue(organizationSummaryParts, organizationName ? `${organizationName} is the owning organization for this meeting.` : null);
-    pushIfValue(organizationSummaryParts, job.organizationDomain ? `Primary domain: ${job.organizationDomain}.` : null);
-    pushIfValue(organizationSummaryParts, companyName && companyName !== organizationName ? `Guest company identified as ${companyName}.` : null);
+    pushIfValue(organizationSummaryParts, hints.organizationName ? `${hints.organizationName} is the owning organization for this meeting.` : null);
+    pushIfValue(organizationSummaryParts, hints.organizationDomain ? `Primary domain: ${hints.organizationDomain}.` : null);
+    pushIfValue(organizationSummaryParts, hints.companyName && hints.companyName !== hints.organizationName ? `Guest company identified as ${hints.companyName}.` : null);
+    pushIfValue(organizationSummaryParts, hints.companyWebsiteUrl ? `Review ${hints.companyWebsiteUrl} for current positioning and product context before the call.` : null);
 
     const recentSignals = [
       `Meeting booked: ${job.meetingTitle}`,
       `Scheduled start: ${new Date(job.startsAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`,
-      job.personLinkedInUrl ? "A person LinkedIn URL is already attached for richer context." : "No LinkedIn profile URL attached yet.",
-      job.companyDomain ? `Company domain observed from attendee data: ${job.companyDomain}.` : "No company domain detected from attendee data.",
-      "This snapshot is seeded from calendar and attendee metadata. Replace it with an enrichment provider for deeper research.",
+      job.personLinkedInUrl
+        ? "A person LinkedIn URL is already attached for richer context."
+        : hints.personLinkedInSearchUrl
+          ? "Prepared a LinkedIn search link for quick person lookup."
+          : "No LinkedIn profile URL or search hint could be prepared yet.",
+      hints.companyDomain
+        ? hints.domainSource === "email"
+          ? `Derived likely company domain from work email: ${hints.companyDomain}.`
+          : `Company domain available for context review: ${hints.companyDomain}.`
+        : "No business domain could be inferred from attendee data.",
+      hints.companyWebsiteUrl ? `Public website to review: ${hints.companyWebsiteUrl}.` : "No website URL could be assembled from the available data.",
+      "This snapshot is seeded from attendee metadata plus deterministic email-domain inference.",
     ];
 
     return {
@@ -75,10 +229,15 @@ export class ManualResearchProvider implements ResearchProvider {
         personFullName: job.personFullName,
         personEmail: job.personEmail,
         personTitle: job.personTitle,
-        companyName,
-        companyDomain: job.companyDomain,
-        organizationName,
-        organizationDomain: job.organizationDomain,
+        companyName: hints.companyName,
+        companyDomain: hints.companyDomain,
+        organizationName: hints.organizationName,
+        organizationDomain: hints.organizationDomain,
+        companyWebsiteUrl: hints.companyWebsiteUrl,
+        organizationWebsiteUrl: hints.organizationWebsiteUrl,
+        personLinkedInSearchUrl: hints.personLinkedInSearchUrl,
+        organizationLinkedInSearchUrl: hints.organizationLinkedInSearchUrl,
+        domainSource: hints.domainSource,
       },
     };
   }
@@ -120,6 +279,7 @@ export class OpenAiResearchProvider implements ResearchProvider {
   ) {}
 
   async enrich(job: ResearchJobWorkItem): Promise<ResearchSnapshot> {
+    const fallback = await new ManualResearchProvider().enrich(job);
     const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
@@ -133,7 +293,7 @@ export class OpenAiResearchProvider implements ResearchProvider {
           {
             role: "system",
             content:
-              "You create meeting research briefs. Respond with strict JSON only, with keys personSummary, organizationSummary, recentSignals, linkedInUrl, references. Keep summaries concise and avoid inventing facts. Use only the supplied meeting and attendee data.",
+              "You create meeting research briefs. Respond with strict JSON only, with keys personSummary, organizationSummary, recentSignals, linkedInUrl, references. Keep summaries concise and avoid inventing facts. Use only the supplied meeting, attendee data, and deterministic hints. Infer context from business email domains when provided. If a direct LinkedIn profile is not known, keep linkedInUrl empty and put search URLs in references instead.",
           },
           {
             role: "user",
@@ -150,6 +310,13 @@ export class OpenAiResearchProvider implements ResearchProvider {
               organizationDomain: job.organizationDomain,
               organizationLinkedInUrl: job.organizationLinkedInUrl,
               source: job.source,
+              deterministicHints: fallback.rawPayload,
+              fallbackSnapshot: {
+                personSummary: fallback.personSummary,
+                organizationSummary: fallback.organizationSummary,
+                recentSignals: fallback.recentSignals,
+                references: fallback.references,
+              },
             }),
           },
         ],
@@ -202,7 +369,6 @@ export class OpenAiResearchProvider implements ResearchProvider {
     }
 
     const parsed = parseAiResearchResponse(content);
-    const fallback = await new ManualResearchProvider().enrich(job);
 
     return {
       personSummary: parsed.personSummary || fallback.personSummary,

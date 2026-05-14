@@ -8,6 +8,7 @@ import type {
   MeetingRecord,
   SessionHistoryDetail,
   SessionHistoryItem,
+  SessionParticipantTranslationPreferences,
   SessionStopReason,
   SessionSummary,
   TranscriptSegment,
@@ -25,6 +26,7 @@ interface SessionRow {
   stop_reason: SessionHistoryItem["stopReason"];
   summary_json: string;
   context_json: string | null;
+  participant_preferences_json: string | null;
 }
 
 function parseJson<T>(value: string | null): T | null {
@@ -59,6 +61,7 @@ export interface CompletedSessionRecord {
   transcript: TranscriptSegment[];
   coaching: CoachingPrompt[];
   context: MeetingContext | null;
+  participantPreferences: SessionParticipantTranslationPreferences | null;
 }
 
 export interface StoredMeetingLaunchContext {
@@ -69,6 +72,18 @@ export interface StoredMeetingLaunchContext {
 export interface StoredRuntimeSecrets {
   aiApiKey: string;
   transcriptionApiKey: string;
+}
+
+export interface StoredTranslationRuntimeSettings {
+  enabled: boolean;
+  hostLanguage: string;
+  guestLanguage: string;
+  hostVoiceEnabled: boolean;
+  guestVoiceEnabled: boolean;
+  hostVoiceName: string;
+  guestVoiceName: string;
+  transcriptionFlushMs: number;
+  transcriptionFlushBytes: number;
 }
 
 export type DesktopCloseBehavior = "ask" | "tray" | "quit";
@@ -97,7 +112,8 @@ export class SessionStore {
         completed_at TEXT NOT NULL,
         stop_reason TEXT NOT NULL,
         summary_json TEXT NOT NULL,
-        context_json TEXT
+        context_json TEXT,
+        participant_preferences_json TEXT
       );
 
       CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -107,6 +123,8 @@ export class SessionStore {
         speaker_id INTEGER,
         speaker_label TEXT,
         text TEXT NOT NULL,
+        translated_text TEXT,
+        translated_language TEXT,
         is_final INTEGER NOT NULL,
         created_at TEXT NOT NULL,
         FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -127,8 +145,11 @@ export class SessionStore {
 
     this.ensureColumn("transcript_segments", "speaker_id", "INTEGER");
     this.ensureColumn("transcript_segments", "speaker_label", "TEXT");
+    this.ensureColumn("transcript_segments", "translated_text", "TEXT");
+    this.ensureColumn("transcript_segments", "translated_language", "TEXT");
     this.ensureColumn("coaching_prompts", "speaker_id", "INTEGER");
     this.ensureColumn("coaching_prompts", "speaker_label", "TEXT");
+    this.ensureColumn("sessions", "participant_preferences_json", "TEXT");
   }
 
   async read(): Promise<PersistedState> {
@@ -184,6 +205,37 @@ export class SessionStore {
     });
   }
 
+  async readTranslationRuntimeSettings(): Promise<StoredTranslationRuntimeSettings | null> {
+    const value = this.readSetting<Partial<StoredTranslationRuntimeSettings>>("translation_runtime_settings");
+    if (!value) {
+      return null;
+    }
+
+    return {
+      enabled: value.enabled === true,
+      hostLanguage: typeof (value as { hostLanguage?: unknown; sourceLanguage?: unknown }).hostLanguage === "string"
+        ? (value as { hostLanguage: string }).hostLanguage
+        : typeof (value as { hostLanguage?: unknown; sourceLanguage?: unknown }).sourceLanguage === "string"
+          ? (value as { sourceLanguage: string }).sourceLanguage
+          : "",
+      guestLanguage: typeof (value as { guestLanguage?: unknown; targetLanguage?: unknown }).guestLanguage === "string"
+        ? (value as { guestLanguage: string }).guestLanguage
+        : typeof (value as { guestLanguage?: unknown; targetLanguage?: unknown }).targetLanguage === "string"
+          ? (value as { targetLanguage: string }).targetLanguage
+          : "",
+      hostVoiceEnabled: (value as { hostVoiceEnabled?: unknown }).hostVoiceEnabled === true,
+      guestVoiceEnabled: (value as { guestVoiceEnabled?: unknown }).guestVoiceEnabled === true,
+      hostVoiceName: typeof (value as { hostVoiceName?: unknown }).hostVoiceName === "string" ? (value as { hostVoiceName: string }).hostVoiceName : "",
+      guestVoiceName: typeof (value as { guestVoiceName?: unknown }).guestVoiceName === "string" ? (value as { guestVoiceName: string }).guestVoiceName : "",
+      transcriptionFlushMs: typeof value.transcriptionFlushMs === "number" && Number.isFinite(value.transcriptionFlushMs) ? value.transcriptionFlushMs : 0,
+      transcriptionFlushBytes: typeof value.transcriptionFlushBytes === "number" && Number.isFinite(value.transcriptionFlushBytes) ? value.transcriptionFlushBytes : 0,
+    };
+  }
+
+  async writeTranslationRuntimeSettings(value: StoredTranslationRuntimeSettings): Promise<void> {
+    this.writeSetting("translation_runtime_settings", value);
+  }
+
   async readDesktopCloseBehavior(): Promise<DesktopCloseBehavior> {
     const value = this.readSetting<DesktopCloseBehavior>("desktop_close_behavior");
     return value === "tray" || value === "quit" ? value : "ask";
@@ -210,8 +262,9 @@ export class SessionStore {
               completed_at,
               stop_reason,
               summary_json,
-              context_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              context_json,
+              participant_preferences_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
               meeting_id = excluded.meeting_id,
               meeting_title = excluded.meeting_title,
@@ -222,7 +275,8 @@ export class SessionStore {
               completed_at = excluded.completed_at,
               stop_reason = excluded.stop_reason,
               summary_json = excluded.summary_json,
-              context_json = excluded.context_json
+              context_json = excluded.context_json,
+              participant_preferences_json = excluded.participant_preferences_json
           `,
         )
         .run(
@@ -237,6 +291,7 @@ export class SessionStore {
           record.stopReason,
           JSON.stringify(record.summary),
           JSON.stringify(record.context),
+          JSON.stringify(record.participantPreferences),
         );
 
       this.database.prepare("DELETE FROM transcript_segments WHERE session_id = ?").run(record.summary.sessionId);
@@ -244,8 +299,8 @@ export class SessionStore {
 
       const transcriptStatement = this.database.prepare(
         `
-          INSERT INTO transcript_segments (id, session_id, source, speaker_id, speaker_label, text, is_final, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO transcript_segments (id, session_id, source, speaker_id, speaker_label, text, translated_text, translated_language, is_final, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       );
       for (const segment of record.transcript) {
@@ -256,6 +311,8 @@ export class SessionStore {
           segment.speakerId ?? null,
           segment.speakerLabel ?? null,
           segment.text,
+          segment.translatedText ?? null,
+          segment.translatedLanguage ?? null,
           segment.isFinal ? 1 : 0,
           segment.createdAt,
         );
@@ -293,6 +350,7 @@ export class SessionStore {
       .prepare(
         `
           SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json
+          , participant_preferences_json
           FROM sessions
           ORDER BY completed_at DESC
           LIMIT ?
@@ -308,6 +366,7 @@ export class SessionStore {
       .prepare(
         `
           SELECT session_id, meeting_id, meeting_title, meeting_provider, calendar_provider, started_at, expected_end_at, completed_at, stop_reason, summary_json, context_json
+          , participant_preferences_json
           FROM sessions
           WHERE session_id = ?
         `,
@@ -321,7 +380,7 @@ export class SessionStore {
     const transcript = this.database
       .prepare(
         `
-          SELECT id, session_id as sessionId, source, speaker_id as speakerId, speaker_label as speakerLabel, text, is_final as isFinal, created_at as createdAt
+          SELECT id, session_id as sessionId, source, speaker_id as speakerId, speaker_label as speakerLabel, text, translated_text as translatedText, translated_language as translatedLanguage, is_final as isFinal, created_at as createdAt
           FROM transcript_segments
           WHERE session_id = ?
           ORDER BY created_at ASC
@@ -409,6 +468,7 @@ export class SessionStore {
       stopReason: row.stop_reason,
       summary: JSON.parse(row.summary_json) as SessionSummary,
       context: parseJson<MeetingContext>(row.context_json),
+      participantPreferences: parseJson<SessionParticipantTranslationPreferences>(row.participant_preferences_json),
     };
   }
 }

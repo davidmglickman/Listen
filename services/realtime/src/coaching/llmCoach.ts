@@ -60,6 +60,7 @@ function buildEqCommunicationInstruction(): string {
   return [
     "Use an EQ-first communication lens.",
     "Favor coaching that improves trust, empathy, listening, emotional control, and shared outcomes over surface-level speech cleanup.",
+    "When the meeting context is sales, treat the advice as Sales EQ coaching: prioritize buyer understanding, discovery quality, trust-building, calm confidence, and crisp next steps over delivery nitpicks.",
     "Use Seven Habits style communication principles: be proactive, begin with the desired outcome, prioritize what matters, think win-win, seek first to understand before trying to be understood, and create alignment instead of tension.",
     "Only mention filler words, pacing, or long answers when they are clearly blocking empathy, clarity, or forward motion.",
     "Prefer advice about curiosity, acknowledgment, reframing, concise ownership, calm tone, and better questions.",
@@ -139,15 +140,15 @@ function buildContextAwareMessage(ruleType: CoachingRuleType, meetingContext?: M
   if (ruleType === "filler") {
     if (callFunction === "sales" && callType.includes("discovery")) {
       return {
-        title: "Slow down and understand the buyer",
-        message: "Pause, show you heard them, and ask one focused question that uncovers pain, process, or timing before you push your point.",
+        title: "Pause and deepen understanding before sharing",
+        message: "Pause briefly after they speak to show you're listening, then ask one focused, open-ended question about their pain points or process before moving forward.",
       };
     }
 
     if (callFunction === "sales" && callType.includes("demo")) {
       return {
-        title: "Reconnect to their outcome",
-        message: "Keep the demo anchored on their goal. State the outcome in plain language, then show proof that answers their concern.",
+        title: "Lead with their outcome",
+        message: "Acknowledge the concern, restate the outcome they care about, and then show the part of the demo that directly answers it.",
       };
     }
 

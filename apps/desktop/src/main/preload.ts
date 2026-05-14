@@ -6,10 +6,23 @@ type StateListener = (snapshot: AppSnapshot) => void;
 type RuntimeCapabilities = {
   aiConfigured: boolean;
   cloudTranscriptionConfigured: boolean;
+  translationEnabled: boolean;
+  translationReady: boolean;
 };
 type RuntimeSecrets = {
   aiApiKey: string;
   transcriptionApiKey: string;
+};
+type TranslationRuntimeSettings = {
+  enabled: boolean;
+  hostLanguage: string;
+  guestLanguage: string;
+  hostVoiceEnabled: boolean;
+  guestVoiceEnabled: boolean;
+  hostVoiceName: string;
+  guestVoiceName: string;
+  transcriptionFlushMs: number;
+  transcriptionFlushBytes: number;
 };
 type UpdaterState = {
   enabled: boolean;
@@ -95,6 +108,9 @@ contextBridge.exposeInMainWorld("listenBridge", {
   getRuntimeCapabilities: (): Promise<RuntimeCapabilities> => ipcRenderer.invoke("app:get-runtime-capabilities"),
   getRuntimeSecrets: (): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:get"),
   saveRuntimeSecrets: (secrets: RuntimeSecrets): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:save", secrets),
+  getTranslationRuntimeSettings: (): Promise<TranslationRuntimeSettings> => ipcRenderer.invoke("translation-settings:get"),
+  saveTranslationRuntimeSettings: (settings: TranslationRuntimeSettings): Promise<TranslationRuntimeSettings> =>
+    ipcRenderer.invoke("translation-settings:save", settings),
   getUpdaterState: (): Promise<UpdaterState> => ipcRenderer.invoke("updater:get-state"),
   checkForUpdates: (): Promise<UpdaterState> => ipcRenderer.invoke("updater:check"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("updater:install"),
@@ -164,6 +180,8 @@ declare global {
       getRuntimeCapabilities(): Promise<RuntimeCapabilities>;
       getRuntimeSecrets(): Promise<RuntimeSecrets>;
       saveRuntimeSecrets(secrets: RuntimeSecrets): Promise<RuntimeSecrets>;
+      getTranslationRuntimeSettings(): Promise<TranslationRuntimeSettings>;
+      saveTranslationRuntimeSettings(settings: TranslationRuntimeSettings): Promise<TranslationRuntimeSettings>;
       getUpdaterState(): Promise<UpdaterState>;
       checkForUpdates(): Promise<UpdaterState>;
       installUpdate(): Promise<void>;
