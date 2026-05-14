@@ -187,12 +187,14 @@ export interface AppAuthUser {
   fullName: string | null;
   role: "owner" | "admin" | "member" | null;
   status: "invited" | "active" | "disabled" | null;
+  isSuperAdmin?: boolean;
 }
 
 export interface AppAuthState {
   configured: boolean;
   signedIn: boolean;
   pendingEmail: string | null;
+  accessMessage: string | null;
   user: AppAuthUser | null;
 }
 
@@ -218,8 +220,26 @@ export interface AdminUserInvitation {
   acceptedUserId: string | null;
 }
 
+export interface AdminOrganizationSummary {
+  id: string;
+  slug: string;
+  name: string;
+  domain: string | null;
+  status: "active" | "disabled";
+  maxUsers: number | null;
+  userCount: number;
+  pendingInvitationCount: number;
+  adminUserId: string | null;
+  adminEmail: string | null;
+  adminFullName: string | null;
+  adminRole: "owner" | "admin" | null;
+  downloadUrl: string | null;
+}
+
 export interface AdminUserDirectory {
   viewer: AppAuthUser;
+  organizations?: AdminOrganizationSummary[];
+  selectedOrganizationId?: string | null;
   users: AdminManagedUser[];
   invitations: AdminUserInvitation[];
 }

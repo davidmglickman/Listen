@@ -26,6 +26,16 @@ function normalizeStoredSession(session: Session | null): StoredSupabaseSession 
   };
 }
 
+function buildGoogleAuthError(error: { message?: string | null } | null | undefined): Error {
+  const message = error?.message?.trim() || "Unable to start Google sign-in.";
+
+  if (/provider is not enabled/i.test(message) || /unsupported provider/i.test(message)) {
+    return new Error("Google sign-in is not enabled in Supabase. Enable the Google provider in Supabase Auth settings and configure its client ID and secret.");
+  }
+
+  return new Error(message);
+}
+
 export class DesktopSupabaseAuthService {
   private client: SupabaseClient | null = null;
   private configured = false;
@@ -33,6 +43,7 @@ export class DesktopSupabaseAuthService {
     configured: false,
     signedIn: false,
     pendingEmail: null,
+    accessMessage: null,
     user: null,
   };
   private storageCache: Record<string, string> = {};
@@ -49,18 +60,25 @@ export class DesktopSupabaseAuthService {
     this.storageCache = await this.sessionStore.readSupabaseStorage();
 
     this.configured = Boolean(url && anonKey);
-    this.currentState = persistedState ?? {
-      configured: this.configured,
-      signedIn: false,
-      pendingEmail: null,
-      user: null,
-    };
+    this.currentState = persistedState
+      ? {
+          ...persistedState,
+          configured: this.configured,
+        }
+      : {
+          configured: this.configured,
+          signedIn: false,
+          pendingEmail: null,
+          accessMessage: null,
+          user: null,
+        };
 
     if (!this.configured) {
       this.currentState = {
         configured: false,
         signedIn: false,
         pendingEmail: null,
+        accessMessage: null,
         user: null,
       };
       await this.persistState();
@@ -120,6 +138,7 @@ export class DesktopSupabaseAuthService {
   async hydrateProfile(user: AppAuthState["user"] | null): Promise<AppAuthState> {
     this.currentState = {
       ...this.currentState,
+      accessMessage: null,
       user: user
         ? {
             ...user,
@@ -141,7 +160,7 @@ export class DesktopSupabaseAuthService {
     });
 
     if (error || !data?.url) {
-      throw new Error(error?.message ?? "Unable to start Google sign-in.");
+      throw buildGoogleAuthError(error);
     }
 
     const callbackPromise = awaitOAuthCode(OAUTH_PORT, "/auth/callback", OAUTH_TIMEOUT_MS);
@@ -179,6 +198,7 @@ export class DesktopSupabaseAuthService {
       ...this.currentState,
       configured: true,
       pendingEmail: normalizedEmail,
+      accessMessage: null,
     };
     await this.persistState();
     return this.currentState;
@@ -201,7 +221,7 @@ export class DesktopSupabaseAuthService {
     return this.currentState;
   }
 
-  async signOut(): Promise<AppAuthState> {
+  async signOut(accessMessage: string | null = null): Promise<AppAuthState> {
     const client = this.requireClient();
     const { error } = await client.auth.signOut();
     if (error) {
@@ -211,6 +231,11 @@ export class DesktopSupabaseAuthService {
     await this.applySession(null);
     this.storageCache = {};
     await this.sessionStore.writeSupabaseStorage({});
+    this.currentState = {
+      ...this.currentState,
+      accessMessage,
+    };
+    await this.persistState();
     return this.currentState;
   }
 
@@ -234,6 +259,7 @@ export class DesktopSupabaseAuthService {
       configured: this.configured,
       signedIn: Boolean(user),
       pendingEmail: user ? null : this.currentState.pendingEmail,
+      accessMessage: user ? null : this.currentState.accessMessage,
       user: user
         ? {
             id: user.id,

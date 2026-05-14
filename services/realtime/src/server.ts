@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import {
+  OrganizationRoleSchema,
   CalendarSyncRequestSchema,
   CompleteResearchJobRequestSchema,
   ListenInboundEventSchema,
@@ -58,6 +59,10 @@ const webAppDir = path.resolve(process.cwd(), "apps", "web");
 const supabaseSyncService = new SupabaseSyncService(
   createSupabaseAdminClient(),
   process.env.SUPABASE_ORGANIZATION_SLUG?.trim() || "default-org",
+  {
+    superAdminEmails: (process.env.LISTEN_SUPER_ADMIN_EMAILS ?? "").split(","),
+    desktopDownloadUrl: process.env.LISTEN_DESKTOP_DOWNLOAD_URL?.trim() || null,
+  },
 );
 const researchWorker = new ResearchWorker(
   supabaseSyncService,
@@ -67,6 +72,20 @@ const researchWorker = new ResearchWorker(
 
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : (value ?? "");
+}
+
+function getQueryParam(value: unknown): string {
+  if (Array.isArray(value)) {
+    return typeof value[0] === "string" ? value[0] : "";
+  }
+
+  return typeof value === "string" ? value : "";
+}
+
+function getBearerToken(request: Request): string {
+  const authorization = request.header("authorization") ?? "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() ?? "";
 }
 
 function normalizeQuestionContextDocuments(value: unknown): QuestionContextDocument[] {
@@ -262,6 +281,188 @@ app.get("/api/admin/supabase/status", (_request: Request, response: Response) =>
     configured: supabaseSyncService.isConfigured(),
     researchProvider: process.env.SUPABASE_RESEARCH_PROVIDER?.trim() || "manual",
   });
+});
+app.get("/api/auth/me", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  try {
+    const result = await supabaseSyncService.getAuthenticatedProfileResult(accessToken);
+    if (!result.profile) {
+      response.status(403).json({ error: result.reason ?? "Authenticated user does not belong to a Listen organization." });
+      return;
+    }
+
+    response.json({ user: result.profile });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Auth profile lookup failed." });
+  }
+});
+app.get("/api/admin/users", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  try {
+    const directory = await supabaseSyncService.listOrganizationUsers(accessToken, getQueryParam(request.query.organizationId) || null);
+    response.json(directory);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "User directory lookup failed.";
+    response.status(/admin access is required/i.test(message) ? 403 : 500).json({ error: message });
+  }
+});
+app.get("/api/admin/organizations", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  try {
+    const organizations = await supabaseSyncService.listManageableOrganizations(accessToken);
+    response.json({ organizations });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Organization directory lookup failed.";
+    response.status(/admin access is required|super-admin access is required/i.test(message) ? 403 : 500).json({ error: message });
+  }
+});
+app.post("/api/admin/organizations", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  const name = typeof request.body?.name === "string" ? request.body.name.trim() : "";
+  const adminEmail = typeof request.body?.adminEmail === "string" ? request.body.adminEmail.trim() : "";
+  const maxUsers = typeof request.body?.maxUsers === "number" ? request.body.maxUsers : null;
+  if (!name || !adminEmail) {
+    response.status(400).json({ error: "Organization name and admin email are required." });
+    return;
+  }
+
+  try {
+    const organization = await supabaseSyncService.createOrganization(accessToken, { name, adminEmail, maxUsers });
+    response.status(201).json({ organization });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Organization invitation failed.";
+    response.status(/admin access is required|super-admin access is required/i.test(message) ? 403 : 500).json({ error: message });
+  }
+});
+app.patch("/api/admin/organizations/:organizationId", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  const status = request.body?.status === "active" || request.body?.status === "disabled" ? request.body.status : undefined;
+  const maxUsers = typeof request.body?.maxUsers === "number"
+    ? request.body.maxUsers
+    : request.body?.maxUsers === null
+      ? null
+      : undefined;
+  if (typeof status === "undefined" && typeof maxUsers === "undefined") {
+    response.status(400).json({ error: "A valid organization update is required." });
+    return;
+  }
+
+  try {
+    const organization = await supabaseSyncService.updateOrganization(accessToken, getRouteParam(request.params.organizationId), {
+      status,
+      maxUsers,
+    });
+    response.json({ organization });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Organization update failed.";
+    response.status(/admin access is required|super-admin access is required/i.test(message) ? 403 : 500).json({ error: message });
+  }
+});
+app.post("/api/admin/users/invitations", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  const email = typeof request.body?.email === "string" ? request.body.email.trim() : "";
+  const role = OrganizationRoleSchema.safeParse(request.body?.role);
+  if (!email || !role.success) {
+    response.status(400).json({ error: "Valid email and role are required." });
+    return;
+  }
+
+  try {
+    const invitation = await supabaseSyncService.inviteOrganizationUser(accessToken, {
+      email,
+      role: role.data,
+      organizationId: typeof request.body?.organizationId === "string" ? request.body.organizationId : null,
+    });
+    response.status(201).json({ invitation });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invitation failed.";
+    response.status(/admin access is required/i.test(message) ? 403 : 500).json({ error: message });
+  }
+});
+app.patch("/api/admin/users/invitations/:invitationId", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  const action = request.body?.action === "resend" || request.body?.action === "revoke"
+    ? request.body.action
+    : null;
+  if (!action) {
+    response.status(400).json({ error: "A valid invitation action is required." });
+    return;
+  }
+
+  try {
+    const invitation = await supabaseSyncService.updateOrganizationInvitation(
+      accessToken,
+      getRouteParam(request.params.invitationId),
+      action,
+      typeof request.body?.organizationId === "string" ? request.body.organizationId : null,
+    );
+    response.json({ invitation });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invitation update failed.";
+    response.status(/admin access is required/i.test(message) ? 403 : 500).json({ error: message });
+  }
+});
+app.patch("/api/admin/users/:profileId", async (request: Request, response: Response) => {
+  const accessToken = getBearerToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: "Authorization bearer token is required." });
+    return;
+  }
+
+  const roleResult = typeof request.body?.role === "undefined" ? { success: true, data: undefined } : OrganizationRoleSchema.safeParse(request.body.role);
+  const statusValue = request.body?.status;
+  const validStatus = statusValue === "invited" || statusValue === "active" || statusValue === "disabled" ? statusValue : undefined;
+  if (!roleResult.success || (!validStatus && typeof request.body?.role === "undefined")) {
+    response.status(400).json({ error: "A valid role or status update is required." });
+    return;
+  }
+
+  try {
+    const user = await supabaseSyncService.updateOrganizationUser(accessToken, getRouteParam(request.params.profileId), {
+      role: roleResult.success ? roleResult.data : undefined,
+      status: validStatus,
+      organizationId: typeof request.body?.organizationId === "string" ? request.body.organizationId : null,
+    });
+    response.json({ user });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "User update failed.";
+    response.status(/admin access is required/i.test(message) ? 403 : 500).json({ error: message });
+  }
 });
 app.get("/api/admin/research/meetings", async (request: Request, response: Response) => {
   const limit = Number(request.query.limit ?? 50);

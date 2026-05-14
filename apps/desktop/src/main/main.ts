@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
-import type { AdminManagedUser, AdminUserDirectory, AppAuthState, AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
+import type { AdminManagedUser, AdminOrganizationSummary, AdminUserDirectory, AppAuthState, AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, MeetingRecord, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionStopReason, SessionSummary } from "@listen/shared";
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, Notification, session, shell, Tray } from "electron";
 import type { MessageBoxOptions } from "electron";
 import dotenv from "dotenv";
@@ -502,6 +502,7 @@ const snapshot: AppSnapshot = {
     configured: false,
     signedIn: false,
     pendingEmail: null,
+    accessMessage: null,
     user: null,
   },
   upcomingMeetings: [],
@@ -1208,6 +1209,22 @@ async function refreshDesktopAppAuthProfile(): Promise<AppAuthState> {
   const response = await fetchRealtimeWithAppAuth("/api/auth/me");
   if (!response.ok) {
     const body = await response.text();
+    let errorMessage = "This account does not have access to Listen yet. Ask an admin to invite this email, or sign in with the invited account.";
+    try {
+      const payload = JSON.parse(body) as { error?: unknown };
+      if (typeof payload.error === "string" && payload.error.trim()) {
+        errorMessage = payload.error.trim();
+      }
+    } catch {
+      if (body.trim()) {
+        errorMessage = body.trim();
+      }
+    }
+    if (response.status === 401 || response.status === 403) {
+      const signedOutState = await appAuthService.signOut(errorMessage);
+      snapshot.appAuth = signedOutState;
+      return signedOutState;
+    }
     throw new Error(`Failed to hydrate signed-in user: ${response.status} ${body}`.trim());
   }
 
@@ -1215,8 +1232,9 @@ async function refreshDesktopAppAuthProfile(): Promise<AppAuthState> {
   return appAuthService.hydrateProfile(payload.user ?? null);
 }
 
-async function listDesktopAdminUsers(): Promise<AdminUserDirectory> {
-  const response = await fetchRealtimeWithAppAuth("/api/admin/users");
+async function listDesktopAdminUsers(organizationId?: string | null): Promise<AdminUserDirectory> {
+  const query = organizationId ? `?organizationId=${encodeURIComponent(organizationId)}` : "";
+  const response = await fetchRealtimeWithAppAuth(`/api/admin/users${query}`);
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Failed to load users: ${response.status} ${body}`.trim());
@@ -1225,30 +1243,87 @@ async function listDesktopAdminUsers(): Promise<AdminUserDirectory> {
   return response.json() as Promise<AdminUserDirectory>;
 }
 
-async function inviteDesktopAdminUser(email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory> {
+async function listDesktopOrganizations(): Promise<AdminOrganizationSummary[]> {
+  const response = await fetchRealtimeWithAppAuth("/api/admin/organizations");
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to load organizations: ${response.status} ${body}`.trim());
+  }
+
+  const payload = await response.json() as { organizations?: AdminOrganizationSummary[] };
+  return payload.organizations ?? [];
+}
+
+async function createDesktopOrganization(name: string, adminEmail: string, maxUsers?: number | null): Promise<AdminOrganizationSummary[]> {
+  const response = await fetchRealtimeWithAppAuth("/api/admin/organizations", {
+    method: "POST",
+    body: JSON.stringify({ name, adminEmail, maxUsers: typeof maxUsers === "number" ? maxUsers : null }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to create organization: ${response.status} ${body}`.trim());
+  }
+
+  return listDesktopOrganizations();
+}
+
+async function updateDesktopOrganization(
+  organizationId: string,
+  updates: { status?: "active" | "disabled"; maxUsers?: number | null },
+): Promise<AdminOrganizationSummary[]> {
+  const response = await fetchRealtimeWithAppAuth(`/api/admin/organizations/${encodeURIComponent(organizationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to update organization: ${response.status} ${body}`.trim());
+  }
+
+  return listDesktopOrganizations();
+}
+
+async function inviteDesktopAdminUser(email: string, role: AdminManagedUser["role"], organizationId?: string | null): Promise<AdminUserDirectory> {
   const inviteResponse = await fetchRealtimeWithAppAuth("/api/admin/users/invitations", {
     method: "POST",
-    body: JSON.stringify({ email, role }),
+    body: JSON.stringify({ email, role, organizationId: organizationId ?? null }),
   });
   if (!inviteResponse.ok) {
     const body = await inviteResponse.text();
     throw new Error(`Failed to invite user: ${inviteResponse.status} ${body}`.trim());
   }
 
-  return listDesktopAdminUsers();
+  return listDesktopAdminUsers(organizationId);
 }
 
-async function updateDesktopAdminUser(profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory> {
+async function updateDesktopAdminInvitation(invitationId: string, action: "resend" | "revoke", organizationId?: string | null): Promise<AdminUserDirectory> {
+  const response = await fetchRealtimeWithAppAuth(`/api/admin/users/invitations/${encodeURIComponent(invitationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action, organizationId: organizationId ?? null }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to ${action} invitation: ${response.status} ${body}`.trim());
+  }
+
+  return listDesktopAdminUsers(organizationId);
+}
+
+async function updateDesktopAdminUser(
+  profileId: string,
+  updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] },
+  organizationId?: string | null,
+): Promise<AdminUserDirectory> {
   const response = await fetchRealtimeWithAppAuth(`/api/admin/users/${encodeURIComponent(profileId)}`, {
     method: "PATCH",
-    body: JSON.stringify(updates),
+    body: JSON.stringify({ ...updates, organizationId: organizationId ?? null }),
   });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Failed to update user: ${response.status} ${body}`.trim());
   }
 
-  return listDesktopAdminUsers();
+  return listDesktopAdminUsers(organizationId);
 }
 
 async function readDesktopRuntimeSecrets(): Promise<StoredRuntimeSecrets> {
@@ -2697,14 +2772,30 @@ function registerHandlers(): void {
     broadcastSnapshot();
     return authState;
   });
-  ipcMain.handle("admin-users:list", async (): Promise<AdminUserDirectory> => listDesktopAdminUsers());
-  ipcMain.handle("admin-users:invite", async (_event, email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory> =>
-    inviteDesktopAdminUser(email, role),
+  ipcMain.handle("admin-users:list", async (_event, organizationId?: string | null): Promise<AdminUserDirectory> => listDesktopAdminUsers(organizationId));
+  ipcMain.handle("admin-organizations:list", async (): Promise<AdminOrganizationSummary[]> => listDesktopOrganizations());
+  ipcMain.handle(
+    "admin-organizations:create",
+    async (_event, name: string, adminEmail: string, maxUsers?: number | null): Promise<AdminOrganizationSummary[]> =>
+      createDesktopOrganization(name, adminEmail, maxUsers),
+  );
+  ipcMain.handle(
+    "admin-organizations:update",
+    async (_event, organizationId: string, updates: { status?: "active" | "disabled"; maxUsers?: number | null }): Promise<AdminOrganizationSummary[]> =>
+      updateDesktopOrganization(organizationId, updates),
+  );
+  ipcMain.handle("admin-users:invite", async (_event, email: string, role: AdminManagedUser["role"], organizationId?: string | null): Promise<AdminUserDirectory> =>
+    inviteDesktopAdminUser(email, role, organizationId),
+  );
+  ipcMain.handle(
+    "admin-users:update-invitation",
+    async (_event, invitationId: string, action: "resend" | "revoke", organizationId?: string | null): Promise<AdminUserDirectory> =>
+      updateDesktopAdminInvitation(invitationId, action, organizationId),
   );
   ipcMain.handle(
     "admin-users:update",
-    async (_event, profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory> =>
-      updateDesktopAdminUser(profileId, updates),
+    async (_event, profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }, organizationId?: string | null): Promise<AdminUserDirectory> =>
+      updateDesktopAdminUser(profileId, updates, organizationId),
   );
   ipcMain.handle("app:get-runtime-capabilities", async () => getRuntimeCapabilitiesSnapshot());
   ipcMain.handle("runtime-secrets:get", async () => readDesktopRuntimeSecrets());

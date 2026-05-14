@@ -2058,8 +2058,8 @@
                 <div id="setup-panel-connections" class="workspace-panel active">
                   <div class="card stack">
                     <div>
-                      <h3>Listen Login</h3>
-                      <p class="muted">Sign into Listen with Google or send yourself an email magic link. This is separate from calendar access.</p>
+                      <h3>Listen Access</h3>
+                      <p class="muted">Sign up or sign in to Listen with Google or an email magic link. This is separate from calendar access.</p>
                     </div>
                     <div id="app-auth-summary" class="meta-line">Listen login is not configured.</div>
                     <div class="field-grid">
@@ -2069,18 +2069,44 @@
                       </label>
                     </div>
                     <div class="meeting-actions">
-                      <button id="auth-google-sign-in" class="secondary">Sign In with Google</button>
-                      <button id="auth-email-send-link" class="secondary">Send Magic Link</button>
-                      <button id="auth-email-complete" class="secondary">Complete Email Sign-In</button>
+                      <button id="auth-google-sign-in" class="secondary">Continue with Google</button>
+                      <button id="auth-email-send-link" class="secondary">Send Email Link</button>
+                      <button id="auth-email-complete" class="secondary">Complete Email Link</button>
                       <button id="auth-sign-out" class="secondary">Sign Out</button>
                     </div>
                   </div>
                   <div id="admin-users-panel" class="card stack" hidden>
                     <div>
                       <h3>User Management</h3>
-                      <p class="muted">Invite teammates, review current org members, and adjust roles or account status.</p>
+                      <p class="muted">Manage organizations, invite initial admins, and handle users for the selected org.</p>
                     </div>
                     <div id="admin-users-summary" class="meta-line">Sign in as an admin to manage users.</div>
+                    <div id="admin-org-super-panel" class="stack" hidden>
+                      <div class="field-grid">
+                        <label>
+                          Organization to manage
+                          <select id="admin-organization-select"></select>
+                        </label>
+                      </div>
+                      <div id="admin-organization-list" class="stack"></div>
+                      <div class="field-grid">
+                        <label>
+                          New organization name
+                          <input id="admin-org-name" type="text" placeholder="Acme" autocomplete="organization" />
+                        </label>
+                        <label>
+                          Initial admin email
+                          <input id="admin-org-admin-email" type="email" placeholder="owner@acme.com" autocomplete="email" />
+                        </label>
+                        <label>
+                          User limit
+                          <input id="admin-org-max-users" type="number" min="1" placeholder="10" />
+                        </label>
+                      </div>
+                      <div class="meeting-actions">
+                        <button id="admin-org-create" class="secondary">Invite Organization</button>
+                      </div>
+                    </div>
                     <div class="field-grid">
                       <label>
                         Invite email
@@ -2292,10 +2318,13 @@
           configured: false,
           signedIn: false,
           pendingEmail: null,
+          accessMessage: null,
           user: null,
         },
         adminDirectory: {
           viewer: null,
+          organizations: [],
+          selectedOrganizationId: null,
           users: [],
           invitations: [],
           status: "idle",
@@ -2469,6 +2498,13 @@
       const authSignOutButtonEl = document.getElementById("auth-sign-out");
       const adminUsersPanelEl = document.getElementById("admin-users-panel");
       const adminUsersSummaryEl = document.getElementById("admin-users-summary");
+      const adminOrgSuperPanelEl = document.getElementById("admin-org-super-panel");
+      const adminOrganizationSelectEl = document.getElementById("admin-organization-select");
+      const adminOrganizationListEl = document.getElementById("admin-organization-list");
+      const adminOrgNameEl = document.getElementById("admin-org-name");
+      const adminOrgAdminEmailEl = document.getElementById("admin-org-admin-email");
+      const adminOrgMaxUsersEl = document.getElementById("admin-org-max-users");
+      const adminOrgCreateButtonEl = document.getElementById("admin-org-create");
       const adminUserEmailEl = document.getElementById("admin-user-email");
       const adminUserRoleEl = document.getElementById("admin-user-role");
       const adminUserInviteButtonEl = document.getElementById("admin-user-invite");
@@ -3778,7 +3814,7 @@
                 ? `Signed in as ${snapshot.appAuth.user?.email || snapshot.appAuth.user?.fullName || "current user"}.`
                 : snapshot.appAuth?.pendingEmail
                   ? `Magic link sent to ${snapshot.appAuth.pendingEmail}. Finish it in your browser, then click Complete Email Sign-In.`
-                  : "Sign in with Google or send an email magic link so this device has an authenticated Listen user.",
+                  : "Sign up or sign in with Google or an email magic link so this device has an authenticated Listen user.",
             complete: appAuthReady,
           },
           {
@@ -3839,21 +3875,306 @@
         state.appAuth = snapshot.appAuth || state.appAuth;
         const authState = state.appAuth;
         appAuthSummaryEl.textContent = !authState.configured
-          ? "Supabase Auth is not configured in the desktop environment."
+          ? "Supabase Auth is not configured in the desktop environment. Restart the desktop app after updating .env, then try again."
           : authState.signedIn
-            ? `Signed in as ${authState.user?.email || authState.user?.fullName || authState.user?.id}.`
+            ? `${authState.user?.email || authState.user?.fullName || authState.user?.id}${authState.user?.role ? ` · ${authState.user.role}` : ""}${authState.user?.status ? ` · ${authState.user.status}` : ""}`
             : authState.pendingEmail
               ? `Magic link sent to ${authState.pendingEmail}. Open the link, then return here and click Complete Email Sign-In.`
+              : authState.accessMessage
+                ? authState.accessMessage
               : "Not signed in.";
 
         if (!authEmailInputEl.value && authState.pendingEmail) {
           authEmailInputEl.value = authState.pendingEmail;
         }
 
-        authGoogleSignInButtonEl.disabled = !authState.configured || authState.signedIn;
-        authEmailSendLinkButtonEl.disabled = !authState.configured || authState.signedIn;
-        authEmailCompleteButtonEl.disabled = !authState.configured || !authState.pendingEmail || authState.signedIn;
-        authSignOutButtonEl.disabled = !authState.configured || !authState.signedIn;
+        authGoogleSignInButtonEl.disabled = authState.signedIn;
+        authEmailSendLinkButtonEl.disabled = authState.signedIn;
+        authEmailCompleteButtonEl.disabled = !authState.pendingEmail || authState.signedIn;
+        authSignOutButtonEl.disabled = !authState.signedIn;
+      }
+
+      async function refreshAppAuthState() {
+        const authState = await window.listenBridge.getAuthState();
+        state.appAuth = authState;
+        if (state.snapshot) {
+          state.snapshot.appAuth = authState;
+        }
+        renderAppAuth(state.snapshot || createEmptySnapshot());
+        return authState;
+      }
+
+      async function ensureAppAuthConfigured() {
+        const authState = await refreshAppAuthState();
+        if (!authState.configured) {
+          throw new Error("Supabase Auth is not configured in the desktop environment. Restart the desktop app after updating .env.");
+        }
+
+        return authState;
+      }
+
+      function resetAdminDirectory(note = "") {
+        state.adminDirectory = {
+          viewer: null,
+          organizations: [],
+          selectedOrganizationId: null,
+          users: [],
+          invitations: [],
+          status: note ? "ready" : "idle",
+          note,
+        };
+      }
+
+      async function refreshAdminDirectory() {
+        if (!state.appAuth?.signedIn || !["owner", "admin"].includes(state.appAuth?.user?.role || "")) {
+          resetAdminDirectory(state.appAuth?.signedIn ? "Signed in user does not have admin access." : "Sign in as an admin to manage users.");
+          renderAdminDirectory();
+          return state.adminDirectory;
+        }
+
+        state.adminDirectory.status = "loading";
+        state.adminDirectory.note = "Loading organization users...";
+        renderAdminDirectory();
+
+        try {
+          const directory = await window.listenBridge.listAdminUsers(state.adminDirectory.selectedOrganizationId || null);
+          state.adminDirectory = {
+            ...directory,
+            organizations: directory.organizations || state.adminDirectory.organizations || [],
+            selectedOrganizationId: directory.selectedOrganizationId || state.adminDirectory.selectedOrganizationId || directory.organizations?.[0]?.id || null,
+            status: "ready",
+            note: directory.users.length ? "" : "No users found in this organization yet.",
+          };
+        } catch (error) {
+          state.adminDirectory = {
+            viewer: state.appAuth.user,
+            organizations: state.adminDirectory.organizations || [],
+            selectedOrganizationId: state.adminDirectory.selectedOrganizationId || null,
+            users: [],
+            invitations: [],
+            status: "error",
+            note: formatError(error),
+          };
+        }
+
+        renderAdminDirectory();
+        return state.adminDirectory;
+      }
+
+      function renderAdminDirectory() {
+        const authState = state.appAuth;
+        const isSuperAdmin = authState?.user?.isSuperAdmin === true;
+        const canManageUsers = authState?.signedIn && (["owner", "admin"].includes(authState?.user?.role || "") || isSuperAdmin);
+        const organizations = state.adminDirectory.organizations || [];
+        const selectedOrganization = organizations.find((organization) => organization.id === state.adminDirectory.selectedOrganizationId) || null;
+        adminUsersPanelEl.hidden = !authState?.signedIn;
+        adminOrgSuperPanelEl.hidden = !isSuperAdmin;
+
+        if (!authState?.signedIn) {
+          adminUsersSummaryEl.textContent = "Sign in as an admin to manage users.";
+          adminOrganizationListEl.innerHTML = "";
+          adminUserListEl.innerHTML = "";
+          adminInvitationListEl.innerHTML = "";
+          return;
+        }
+
+        adminOrganizationSelectEl.disabled = !isSuperAdmin;
+        adminOrgNameEl.disabled = !isSuperAdmin;
+        adminOrgAdminEmailEl.disabled = !isSuperAdmin;
+        adminOrgMaxUsersEl.disabled = !isSuperAdmin;
+        adminOrgCreateButtonEl.disabled = !isSuperAdmin;
+        adminUserInviteButtonEl.disabled = !canManageUsers;
+        adminUserEmailEl.disabled = !canManageUsers;
+        adminUserRoleEl.disabled = !canManageUsers;
+
+        if (!canManageUsers) {
+          adminUsersSummaryEl.textContent = "Your current role does not include user management access.";
+          adminOrganizationListEl.innerHTML = "";
+          adminUserListEl.innerHTML = "";
+          adminInvitationListEl.innerHTML = "";
+          return;
+        }
+
+        if (isSuperAdmin) {
+          adminOrganizationSelectEl.innerHTML = organizations.length
+            ? organizations.map((organization) => `<option value="${organization.id}" ${organization.id === state.adminDirectory.selectedOrganizationId ? "selected" : ""}>${escapeHtml(organization.name)}${organization.status === "disabled" ? " (disabled)" : ""}</option>`).join("")
+            : '<option value="">No organizations yet</option>';
+          adminOrganizationListEl.innerHTML = organizations.length
+            ? `<div class="stack"><h4>Organizations</h4>${organizations.map((organization) => `
+                <div class="connection-card">
+                  <div class="row-between">
+                    <strong>${escapeHtml(organization.name)}</strong>
+                    <span class="badge ${organization.status === "active" ? "success" : "neutral"}">${escapeHtml(organization.status)}</span>
+                  </div>
+                  <div class="meta-line">${escapeHtml(organization.slug)} · ${organization.userCount} users · ${organization.pendingInvitationCount} pending invites · ${organization.maxUsers ? `${organization.maxUsers} max` : "unlimited"}</div>
+                  <div class="meta-line">Admin: ${escapeHtml(organization.adminFullName || organization.adminEmail || "Not assigned yet")}</div>
+                  ${organization.downloadUrl ? `<div class="meta-line">Download: <a href="${escapeHtml(organization.downloadUrl)}" target="_blank" rel="noreferrer">${escapeHtml(organization.downloadUrl)}</a></div>` : ""}
+                  <div class="field-grid">
+                    <label>
+                      User limit
+                      <input type="number" min="1" data-admin-org-max-users="${organization.id}" value="${organization.maxUsers || ""}" placeholder="Unlimited" />
+                    </label>
+                  </div>
+                  <div class="meeting-actions">
+                    <button class="secondary" data-admin-org-manage="${organization.id}">Manage Users</button>
+                    <button class="secondary" data-admin-org-save="${organization.id}">Save Org</button>
+                    <button class="secondary" data-admin-org-toggle="${organization.id}" data-admin-org-status="${organization.status === "active" ? "disabled" : "active"}">${organization.status === "active" ? "Disable Org" : "Enable Org"}</button>
+                  </div>
+                </div>
+              `).join("")}</div>`
+            : '<div class="section-empty">No organizations created yet.</div>';
+        } else {
+          adminOrganizationListEl.innerHTML = "";
+        }
+
+        adminUsersSummaryEl.textContent = state.adminDirectory.status === "loading"
+          ? state.adminDirectory.note || "Loading organization users..."
+          : state.adminDirectory.note || `${selectedOrganization ? `${selectedOrganization.name} · ` : ""}${state.adminDirectory.users.length} users · ${state.adminDirectory.invitations.length} invitations`;
+
+        adminUserListEl.innerHTML = state.adminDirectory.users.length
+          ? state.adminDirectory.users.map((user) => `
+              <div class="connection-card">
+                <div class="row-between">
+                  <strong>${escapeHtml(user.fullName || user.email || user.id)}</strong>
+                  <span class="badge ${user.status === "active" ? "success" : "neutral"}">${escapeHtml(user.status)}</span>
+                </div>
+                <p class="body-copy">${escapeHtml(user.email || "No email")}</p>
+                <div class="field-grid">
+                  <label>
+                    Role
+                    <select data-admin-user-role="${user.id}">
+                      ${["owner", "admin", "member"].map((role) => `<option value="${role}" ${user.role === role ? "selected" : ""}>${role}</option>`).join("")}
+                    </select>
+                  </label>
+                  <label>
+                    Status
+                    <select data-admin-user-status="${user.id}">
+                      ${["invited", "active", "disabled"].map((status) => `<option value="${status}" ${user.status === status ? "selected" : ""}>${status}</option>`).join("")}
+                    </select>
+                  </label>
+                </div>
+                <div class="meeting-actions">
+                  <button class="secondary" data-admin-user-save="${user.id}">Save User</button>
+                </div>
+              </div>
+            `).join("")
+          : '<div class="section-empty">No users found yet.</div>';
+
+        adminInvitationListEl.innerHTML = state.adminDirectory.invitations.length
+          ? `<div class="stack"><h4>Pending Invitations</h4>${state.adminDirectory.invitations.map((invitation) => `
+              <div class="card">
+                <div class="row-between">
+                  <strong>${escapeHtml(invitation.email)}</strong>
+                  <span class="badge ${invitation.status === "accepted" ? "success" : "neutral"}">${escapeHtml(invitation.status)}</span>
+                </div>
+                <div class="meta-line">${escapeHtml(invitation.role)} · expires ${escapeHtml(invitation.expiresAt)}</div>
+                <div class="meta-line">Last sent ${escapeHtml(invitation.lastSentAt || "not yet")}</div>
+                ${invitation.status === "accepted"
+                  ? ""
+                  : `<div class="meeting-actions">
+                      <button class="secondary" data-admin-invitation-resend="${invitation.id}">Resend</button>
+                      ${invitation.status === "revoked"
+                        ? ""
+                        : `<button class="secondary" data-admin-invitation-revoke="${invitation.id}">Revoke</button>`}
+                    </div>`}
+              </div>
+            `).join("")}</div>`
+          : "";
+
+        document.querySelectorAll("[data-admin-user-save]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const profileId = button.getAttribute("data-admin-user-save");
+            const roleEl = document.querySelector(`[data-admin-user-role="${profileId}"]`);
+            const statusEl = document.querySelector(`[data-admin-user-status="${profileId}"]`);
+            if (!profileId || !(roleEl instanceof HTMLSelectElement) || !(statusEl instanceof HTMLSelectElement)) {
+              return;
+            }
+
+            const directory = await runUiAction("Updating user...", () => window.listenBridge.updateAdminUser(profileId, {
+              role: roleEl.value,
+              status: statusEl.value,
+            }, state.adminDirectory.selectedOrganizationId || null));
+            state.adminDirectory = { ...directory, status: "ready", note: "User updated." };
+            renderAdminDirectory();
+          });
+        });
+
+        document.querySelectorAll("[data-admin-invitation-resend]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const invitationId = button.getAttribute("data-admin-invitation-resend");
+            if (!invitationId) {
+              return;
+            }
+
+            const directory = await runUiAction("Resending invitation...", () =>
+              window.listenBridge.updateAdminInvitation(invitationId, "resend", state.adminDirectory.selectedOrganizationId || null)
+            );
+            state.adminDirectory = { ...directory, status: "ready", note: "Invitation resent." };
+            renderAdminDirectory();
+          });
+        });
+
+        document.querySelectorAll("[data-admin-invitation-revoke]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const invitationId = button.getAttribute("data-admin-invitation-revoke");
+            if (!invitationId) {
+              return;
+            }
+
+            const directory = await runUiAction("Revoking invitation...", () =>
+              window.listenBridge.updateAdminInvitation(invitationId, "revoke", state.adminDirectory.selectedOrganizationId || null)
+            );
+            state.adminDirectory = { ...directory, status: "ready", note: "Invitation revoked." };
+            renderAdminDirectory();
+          });
+        });
+
+        document.querySelectorAll("[data-admin-org-manage]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const organizationId = button.getAttribute("data-admin-org-manage");
+            if (!organizationId) {
+              return;
+            }
+
+            state.adminDirectory.selectedOrganizationId = organizationId;
+            await refreshAdminDirectory();
+          });
+        });
+
+        document.querySelectorAll("[data-admin-org-save]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const organizationId = button.getAttribute("data-admin-org-save");
+            const input = document.querySelector(`[data-admin-org-max-users="${organizationId}"]`);
+            if (!organizationId || !(input instanceof HTMLInputElement)) {
+              return;
+            }
+
+            const maxUsers = input.value.trim() ? Number(input.value) : null;
+            const organizations = await runUiAction("Saving organization...", () =>
+              window.listenBridge.updateAdminOrganization(organizationId, { maxUsers: Number.isFinite(maxUsers) ? maxUsers : null })
+            );
+            state.adminDirectory.organizations = organizations;
+            state.adminDirectory.note = "Organization updated.";
+            renderAdminDirectory();
+          });
+        });
+
+        document.querySelectorAll("[data-admin-org-toggle]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const organizationId = button.getAttribute("data-admin-org-toggle");
+            const status = button.getAttribute("data-admin-org-status");
+            if (!organizationId || (status !== "active" && status !== "disabled")) {
+              return;
+            }
+
+            const organizations = await runUiAction(`${status === "disabled" ? "Disabling" : "Enabling"} organization...`, () =>
+              window.listenBridge.updateAdminOrganization(organizationId, { status })
+            );
+            state.adminDirectory.organizations = organizations;
+            state.adminDirectory.note = status === "disabled" ? "Organization disabled." : "Organization enabled.";
+            renderAdminDirectory();
+          });
+        });
       }
 
       function getUpdaterActionLabel() {
@@ -6179,6 +6500,14 @@
         await ensureSelectedMeeting(snapshot);
         ensureReviewData(snapshot);
         renderAppAuth(snapshot);
+        renderAdminDirectory();
+        if (
+          state.appAuth?.signedIn
+          && ["owner", "admin"].includes(state.appAuth?.user?.role || "")
+          && (state.adminDirectory.status === "idle" || state.adminDirectory.viewer?.id !== state.appAuth.user?.id)
+        ) {
+          await refreshAdminDirectory();
+        }
         renderConnections(snapshot);
         renderMeetings(snapshot);
         renderSelectedMeetingResearch(snapshot);
@@ -6232,15 +6561,18 @@
         renderSetupStatus(state.snapshot);
       });
       authGoogleSignInButtonEl.addEventListener("click", async () => {
+        await ensureAppAuthConfigured();
         const authState = await runUiAction("Opening Google sign-in for Listen login...", () => window.listenBridge.signInWithGoogle());
         state.appAuth = authState;
         if (state.snapshot) {
           state.snapshot.appAuth = authState;
         }
         renderAppAuth(state.snapshot || createEmptySnapshot());
+        await refreshAdminDirectory();
         renderSetupStatus(state.snapshot || createEmptySnapshot());
       });
       authEmailSendLinkButtonEl.addEventListener("click", async () => {
+        await ensureAppAuthConfigured();
         const email = authEmailInputEl.value.trim();
         if (!email) {
           setStatusBanner("error", "Enter an email address first.");
@@ -6253,25 +6585,69 @@
           state.snapshot.appAuth = authState;
         }
         renderAppAuth(state.snapshot || createEmptySnapshot());
+        renderAdminDirectory();
         renderSetupStatus(state.snapshot || createEmptySnapshot());
       });
       authEmailCompleteButtonEl.addEventListener("click", async () => {
+        await ensureAppAuthConfigured();
         const authState = await runUiAction("Waiting for email sign-in callback...", () => window.listenBridge.completeEmailSignIn());
         state.appAuth = authState;
         if (state.snapshot) {
           state.snapshot.appAuth = authState;
         }
         renderAppAuth(state.snapshot || createEmptySnapshot());
+        await refreshAdminDirectory();
         renderSetupStatus(state.snapshot || createEmptySnapshot());
       });
       authSignOutButtonEl.addEventListener("click", async () => {
+        await ensureAppAuthConfigured();
         const authState = await runUiAction("Signing out of Listen...", () => window.listenBridge.signOut());
         state.appAuth = authState;
+        resetAdminDirectory("Sign in as an admin to manage users.");
         if (state.snapshot) {
           state.snapshot.appAuth = authState;
         }
         renderAppAuth(state.snapshot || createEmptySnapshot());
+        renderAdminDirectory();
         renderSetupStatus(state.snapshot || createEmptySnapshot());
+      });
+      adminUserInviteButtonEl.addEventListener("click", async () => {
+        const email = adminUserEmailEl.value.trim();
+        if (!email) {
+          setStatusBanner("error", "Enter an email address to invite.");
+          return;
+        }
+
+        const directory = await runUiAction("Creating user invite...", () =>
+          window.listenBridge.inviteAdminUser(email, adminUserRoleEl.value, state.adminDirectory.selectedOrganizationId || null)
+        );
+        state.adminDirectory = { ...directory, status: "ready", note: "Invitation created." };
+        adminUserEmailEl.value = "";
+        renderAdminDirectory();
+      });
+      adminOrganizationSelectEl.addEventListener("change", async () => {
+        state.adminDirectory.selectedOrganizationId = adminOrganizationSelectEl.value || null;
+        await refreshAdminDirectory();
+      });
+      adminOrgCreateButtonEl.addEventListener("click", async () => {
+        const name = adminOrgNameEl.value.trim();
+        const adminEmail = adminOrgAdminEmailEl.value.trim();
+        const maxUsers = adminOrgMaxUsersEl.value.trim() ? Number(adminOrgMaxUsersEl.value) : null;
+        if (!name || !adminEmail) {
+          setStatusBanner("error", "Enter an organization name and initial admin email.");
+          return;
+        }
+
+        const organizations = await runUiAction("Inviting organization...", () =>
+          window.listenBridge.createAdminOrganization(name, adminEmail, Number.isFinite(maxUsers) ? maxUsers : null)
+        );
+        state.adminDirectory.organizations = organizations;
+        state.adminDirectory.selectedOrganizationId = organizations[0]?.id || state.adminDirectory.selectedOrganizationId;
+        state.adminDirectory.note = "Organization invited.";
+        adminOrgNameEl.value = "";
+        adminOrgAdminEmailEl.value = "";
+        adminOrgMaxUsersEl.value = "";
+        await refreshAdminDirectory();
       });
       saveTranslationSettingsButtonEl.addEventListener("click", async () => {
         const settings = await runUiAction("Saving translation settings...", () =>
@@ -6486,6 +6862,9 @@
 
           if (authStateResult.status === "fulfilled") {
             state.appAuth = authStateResult.value;
+            if (!["owner", "admin"].includes(state.appAuth?.user?.role || "")) {
+              resetAdminDirectory(state.appAuth?.signedIn ? "Your current role does not include user management access." : "Sign in as an admin to manage users.");
+            }
           }
 
           if (runtimeCapabilitiesResult.status === "fulfilled") {

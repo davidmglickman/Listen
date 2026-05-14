@@ -221,7 +221,7 @@ export async function buildCoachMessageWithAi(
   const fallback = buildCoachMessage(ruleType, context);
   const aiConfig = getAiConfig();
   if (!aiConfig.apiKey) {
-    return null;
+    return fallback;
   }
 
   try {
@@ -289,7 +289,7 @@ export async function buildCoachMessageWithAi(
       : rawContent;
 
     if (!content || typeof content !== "string") {
-      return null;
+      return fallback;
     }
 
     const parsed = JSON.parse(content) as Record<string, unknown>;
@@ -306,12 +306,12 @@ export async function buildCoachMessageWithAi(
       normalizePromptText(shapedResult.title) === normalizePromptText(shapedFallback.title)
       && normalizePromptText(shapedResult.message) === normalizePromptText(shapedFallback.message)
     ) {
-      return null;
+      return shapedFallback;
     }
 
     return shapedResult;
   } catch (error) {
-    console.warn("AI coaching generation failed. Suppressing coaching blurb for this segment.", error);
-    return null;
+    console.warn("AI coaching generation failed. Falling back to heuristic coaching blurb for this segment.", error);
+    return fallback;
   }
 }

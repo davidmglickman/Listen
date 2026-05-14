@@ -51,7 +51,7 @@ const envDefaults = {
   deepgramLanguage: process.env.DEEPGRAM_LANGUAGE?.trim() || "en-US",
   translationEnabled: process.env.LISTEN_TRANSLATION_ENABLED === "true",
   translationHostLanguage: process.env.LISTEN_TRANSLATION_SOURCE_LANGUAGE?.trim() || "English",
-  translationGuestLanguage: process.env.LISTEN_TRANSLATION_TARGET_LANGUAGE?.trim() || "Portuguese (Brazil)",
+  translationGuestLanguage: process.env.LISTEN_TRANSLATION_TARGET_LANGUAGE?.trim() || "English",
   translationHostVoiceEnabled: false,
   translationGuestVoiceEnabled: false,
   translationHostVoiceName: null,

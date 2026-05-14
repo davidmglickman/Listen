@@ -2,9 +2,10 @@ import { createServer } from "node:http";
 
 export async function awaitOAuthCode(port: number, pathname: string, timeoutMs: number): Promise<{ code: string; state: string }> {
   return new Promise((resolve, reject) => {
+    const callbackUrl = `http://127.0.0.1:${port}${pathname}`;
     const timer = setTimeout(() => {
       server.close();
-      reject(new Error("OAuth callback timed out."));
+      reject(new Error(`OAuth callback timed out. Confirm the browser completed sign-in and that ${callbackUrl} is allowed in Supabase Auth redirect URLs.`));
     }, timeoutMs);
 
     const server = createServer((request, response) => {
@@ -14,7 +15,7 @@ export async function awaitOAuthCode(port: number, pathname: string, timeoutMs: 
         return;
       }
 
-      const url = new URL(request.url, `http://127.0.0.1:${port}`);
+      const url = new URL(request.url, `http://localhost:${port}`);
       if (url.pathname !== pathname) {
         response.statusCode = 404;
         response.end("Not found.");
@@ -48,7 +49,7 @@ export async function awaitOAuthCode(port: number, pathname: string, timeoutMs: 
       resolve({ code, state });
     });
 
-    server.listen(port, "127.0.0.1", () => undefined);
+    server.listen(port, () => undefined);
     server.on("error", (error) => {
       clearTimeout(timer);
       reject(error);

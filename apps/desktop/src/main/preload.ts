@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AdminManagedUser, AdminUserDirectory, AppAuthState, AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionSummary } from "@listen/shared";
+import type { AdminManagedUser, AdminOrganizationSummary, AdminUserDirectory, AppAuthState, AppSnapshot, AudioSourceKind, CoachingSettings, MeetingContext, MeetingContextTemplate, OrgContextDocument, SessionHistoryDetail, SessionHistoryItem, SessionParticipantTranslationPreferences, SessionQuestionAnswer, SessionSummary } from "@listen/shared";
 
 type StateListener = (snapshot: AppSnapshot) => void;
 type RuntimeCapabilities = {
@@ -111,10 +111,18 @@ contextBridge.exposeInMainWorld("listenBridge", {
   sendMagicLink: (email: string): Promise<AppAuthState> => ipcRenderer.invoke("auth:send-magic-link", email),
   completeEmailSignIn: (): Promise<AppAuthState> => ipcRenderer.invoke("auth:complete-email-sign-in"),
   signOut: (): Promise<AppAuthState> => ipcRenderer.invoke("auth:sign-out"),
-  listAdminUsers: (): Promise<AdminUserDirectory> => ipcRenderer.invoke("admin-users:list"),
-  inviteAdminUser: (email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory> => ipcRenderer.invoke("admin-users:invite", email, role),
-  updateAdminUser: (profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory> =>
-    ipcRenderer.invoke("admin-users:update", profileId, updates),
+  listAdminUsers: (organizationId?: string | null): Promise<AdminUserDirectory> => ipcRenderer.invoke("admin-users:list", organizationId),
+  listAdminOrganizations: (): Promise<AdminOrganizationSummary[]> => ipcRenderer.invoke("admin-organizations:list"),
+  createAdminOrganization: (name: string, adminEmail: string, maxUsers?: number | null): Promise<AdminOrganizationSummary[]> =>
+    ipcRenderer.invoke("admin-organizations:create", name, adminEmail, maxUsers),
+  updateAdminOrganization: (organizationId: string, updates: { status?: "active" | "disabled"; maxUsers?: number | null }): Promise<AdminOrganizationSummary[]> =>
+    ipcRenderer.invoke("admin-organizations:update", organizationId, updates),
+  inviteAdminUser: (email: string, role: AdminManagedUser["role"], organizationId?: string | null): Promise<AdminUserDirectory> =>
+    ipcRenderer.invoke("admin-users:invite", email, role, organizationId),
+  updateAdminInvitation: (invitationId: string, action: "resend" | "revoke", organizationId?: string | null): Promise<AdminUserDirectory> =>
+    ipcRenderer.invoke("admin-users:update-invitation", invitationId, action, organizationId),
+  updateAdminUser: (profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }, organizationId?: string | null): Promise<AdminUserDirectory> =>
+    ipcRenderer.invoke("admin-users:update", profileId, updates, organizationId),
   getRuntimeCapabilities: (): Promise<RuntimeCapabilities> => ipcRenderer.invoke("app:get-runtime-capabilities"),
   getRuntimeSecrets: (): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:get"),
   saveRuntimeSecrets: (secrets: RuntimeSecrets): Promise<RuntimeSecrets> => ipcRenderer.invoke("runtime-secrets:save", secrets),
@@ -194,9 +202,13 @@ declare global {
       sendMagicLink(email: string): Promise<AppAuthState>;
       completeEmailSignIn(): Promise<AppAuthState>;
       signOut(): Promise<AppAuthState>;
-      listAdminUsers(): Promise<AdminUserDirectory>;
-      inviteAdminUser(email: string, role: AdminManagedUser["role"]): Promise<AdminUserDirectory>;
-      updateAdminUser(profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }): Promise<AdminUserDirectory>;
+      listAdminUsers(organizationId?: string | null): Promise<AdminUserDirectory>;
+      listAdminOrganizations(): Promise<AdminOrganizationSummary[]>;
+      createAdminOrganization(name: string, adminEmail: string, maxUsers?: number | null): Promise<AdminOrganizationSummary[]>;
+      updateAdminOrganization(organizationId: string, updates: { status?: "active" | "disabled"; maxUsers?: number | null }): Promise<AdminOrganizationSummary[]>;
+      inviteAdminUser(email: string, role: AdminManagedUser["role"], organizationId?: string | null): Promise<AdminUserDirectory>;
+      updateAdminInvitation(invitationId: string, action: "resend" | "revoke", organizationId?: string | null): Promise<AdminUserDirectory>;
+      updateAdminUser(profileId: string, updates: { role?: AdminManagedUser["role"]; status?: AdminManagedUser["status"] }, organizationId?: string | null): Promise<AdminUserDirectory>;
       getRuntimeCapabilities(): Promise<RuntimeCapabilities>;
       getRuntimeSecrets(): Promise<RuntimeSecrets>;
       saveRuntimeSecrets(secrets: RuntimeSecrets): Promise<RuntimeSecrets>;

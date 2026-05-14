@@ -2,6 +2,10 @@ import { z } from "zod";
 
 const CallFunctionSchema = z.enum(["sales", "recruiting", "partnership", "internal"]);
 const CoachingScopeSchema = z.enum(["org", "user"]);
+export const AuthProviderSchema = z.enum(["google", "email"]);
+export const OrganizationRoleSchema = z.enum(["owner", "admin", "member"]);
+export const ProfileStatusSchema = z.enum(["invited", "active", "disabled"]);
+export const InvitationStatusSchema = z.enum(["pending", "accepted", "revoked", "expired"]);
 
 export const ResearchStatusSchema = z.enum(["queued", "running", "completed", "failed"]);
 export const ResearchSourceSchema = z.enum(["calendar", "manual", "linkedin_url", "company_domain", "crm", "other"]);
@@ -110,6 +114,37 @@ export const SupabaseCoachingProfileSchema = z.object({
   guidance: z.string().min(1),
 });
 
+export const SupabaseProfileSchema = z.object({
+  id: z.string().uuid(),
+  organizationId: z.string().uuid(),
+  email: z.string().email().nullable().optional(),
+  fullName: z.string().nullable().optional(),
+  role: OrganizationRoleSchema,
+  status: ProfileStatusSchema.default("active"),
+});
+
+export const SupabaseUserInvitationSchema = z.object({
+  id: z.string().uuid().optional(),
+  organizationId: z.string().uuid(),
+  email: z.string().email(),
+  role: OrganizationRoleSchema.default("member"),
+  status: InvitationStatusSchema.default("pending"),
+  invitedBy: z.string().uuid().nullable().optional(),
+  acceptedUserId: z.string().uuid().nullable().optional(),
+  expiresAt: z.string(),
+  lastSentAt: z.string().optional(),
+});
+
+export const SupabaseConnectedAccountSchema = z.object({
+  id: z.string().uuid().optional(),
+  profileId: z.string().uuid(),
+  provider: AuthProviderSchema,
+  providerSubject: z.string().min(1),
+  providerEmail: z.string().email().nullable().optional(),
+  scopes: z.array(z.string()).default([]),
+  metadata: z.record(z.unknown()).default({}),
+});
+
 export type ProspectOrganization = z.infer<typeof ProspectOrganizationSchema>;
 export type ProspectPerson = z.infer<typeof ProspectPersonSchema>;
 export type SyncedMeetingContext = z.infer<typeof SyncedMeetingContextSchema>;
@@ -121,3 +156,10 @@ export type ResearchSnapshot = z.infer<typeof ResearchSnapshotSchema>;
 export type CompleteResearchJobRequest = z.infer<typeof CompleteResearchJobRequestSchema>;
 export type MeetingResearchBriefPayload = z.infer<typeof MeetingResearchBriefSchema>;
 export type SupabaseCoachingProfile = z.infer<typeof SupabaseCoachingProfileSchema>;
+export type AuthProvider = z.infer<typeof AuthProviderSchema>;
+export type OrganizationRole = z.infer<typeof OrganizationRoleSchema>;
+export type ProfileStatus = z.infer<typeof ProfileStatusSchema>;
+export type InvitationStatus = z.infer<typeof InvitationStatusSchema>;
+export type SupabaseProfile = z.infer<typeof SupabaseProfileSchema>;
+export type SupabaseUserInvitation = z.infer<typeof SupabaseUserInvitationSchema>;
+export type SupabaseConnectedAccount = z.infer<typeof SupabaseConnectedAccountSchema>;
