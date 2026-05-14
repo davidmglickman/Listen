@@ -3304,8 +3304,9 @@
                 </div>
               `)
               .join("")
-          syncVoiceSelectors();
           : '<p class="muted">No meeting templates saved yet.</p>';
+
+        syncVoiceSelectors();
 
         document.querySelectorAll("[data-apply-template-id]").forEach((button) => {
           button.addEventListener("click", async () => {
