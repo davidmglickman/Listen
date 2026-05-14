@@ -180,6 +180,50 @@ export interface CalendarConnection {
   accountLabel: string;
 }
 
+export interface AppAuthUser {
+  id: string;
+  organizationId: string | null;
+  email: string | null;
+  fullName: string | null;
+  role: "owner" | "admin" | "member" | null;
+  status: "invited" | "active" | "disabled" | null;
+}
+
+export interface AppAuthState {
+  configured: boolean;
+  signedIn: boolean;
+  pendingEmail: string | null;
+  user: AppAuthUser | null;
+}
+
+export interface AdminManagedUser {
+  id: string;
+  organizationId: string;
+  email: string | null;
+  fullName: string | null;
+  role: "owner" | "admin" | "member";
+  status: "invited" | "active" | "disabled";
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface AdminUserInvitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: "owner" | "admin" | "member";
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expiresAt: string;
+  lastSentAt: string | null;
+  acceptedUserId: string | null;
+}
+
+export interface AdminUserDirectory {
+  viewer: AppAuthUser;
+  users: AdminManagedUser[];
+  invitations: AdminUserInvitation[];
+}
+
 export interface AudioCaptureHealth {
   status: "idle" | "starting" | "active" | "error";
   detail: string;
@@ -200,6 +244,7 @@ export interface TranslationHealth {
 
 export interface AppSnapshot {
   calendarConnections: CalendarConnection[];
+  appAuth: AppAuthState;
   upcomingMeetings: MeetingRecord[];
   pendingPopupMeeting: MeetingRecord | null;
   activeSession: ActiveSession | null;
